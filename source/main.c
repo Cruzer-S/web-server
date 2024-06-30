@@ -1,139 +1,93 @@
 #include <stdio.h>
-#include <stddef.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <threads.h>
+#include <string.h>
+
+#include <netdb.h>
+#include <net/if.h>
 
 #include <unistd.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <net/if.h>
-#include <ifaddrs.h>
-
-#include "Cruzer-S/logger/logger.h"
-#include "Cruzer-S/list/list.h"
 #include "Cruzer-S/net-util/net-util.h"
 
-#define SERVER_LISTEN_BACKLOG 15
+#include "wserver.h"
 
-#define LOGGER_LEVEL_INF 1
-#define LOGGER_LEVEL_CRT 2
-#define LOGGER_LEVEL_ERR 3
+#define msg(...) log(logger, INFO, __VA_ARGS__)
+#define crt(...) log(logger, PCRTC, __VA_ARGS__), exit(EXIT_FAILURE);
+#define wrn(...) log(logger, WARN, __VA_ARGS__)
 
-static Logger create_logger(void)
+Logger logger;
+
+static char *get_hostname(void)
 {
-	Logger logger = logger_create();
-	bool retval;
-
-	retval = logger_define_level(
-		logger, LOGGER_LEVEL_CRT, "critical", stderr
-	);
-	if ( !retval ) return NULL;
-
-	retval = logger_set_format(
-		logger, LOGGER_LEVEL_CRT, "[%d %t][%n:%f:%l] %s: %e\n"
-	);
-	if ( !retval) return NULL;
-
-	retval = logger_define_level(
-		logger, LOGGER_LEVEL_ERR, "error", stderr 
-	);
-	if ( !retval ) return NULL;
-
-	retval = logger_set_format(
-		logger, LOGGER_LEVEL_ERR, "[%d %t][%n:%f:%l] %s: %e\n"
-	);
-
-	retval = logger_define_level(
-		logger, LOGGER_LEVEL_INF, "info", stdout
-	);
-	if ( !retval ) return NULL;
-
-	retval = logger_set_format(
-		logger, LOGGER_LEVEL_INF, "[%d %t][%n:%f:%l] %s\n"
-	);
-
-	return logger;
-}
-
-static char *get_ipv6_address_interface(Logger logg)
-{
-	char *host = NULL;
+	char *hostname;
 
 	struct list *address = get_interface_address(
-		AF_INET6, IFF_UP, IFF_LOOPBACK
+		AF_INET, IFF_UP, IFF_LOOPBACK
 	);
-	if (address == NULL) {
-		log(logg, ERR, "%s", net_util_error());
-		goto RETURN_HOST;
-	}
 
 	if (LIST_IS_EMPTY(address)) {
-		log(logg, ERR, "failed to find address");
-		goto FREE_INTERFACE_ADDRESS;
+		wrn("failed to get interface address");
+		return NULL;
 	}
 
-	struct address_data_node *node = LIST_FIRST_ENTRY(
-		address, struct address_data_node, list
-	);
+	LIST_FOREACH_ENTRY(address, addr, struct address_data_node, list) {
+		hostname = get_host_from_address(
+			&addr->address, NI_NUMERICHOST
+		);
 
-	host = get_host_from_address(
-		&node->address, NI_NUMERICHOST
-	);
-	if (host == NULL)
-		log(logg, ERR, "%s", net_util_error());
+		if (hostname != NULL)
+			break;
+	}
 
-FREE_INTERFACE_ADDRESS:
 	free_interface_address(address);
-RETURN_HOST:
-	return host;
+
+	return hostname;
 }
 
 int main(int argc, char *argv[])
 {
-	int server_fd;
+	char *hostname;
+	const char *service = "443";
+	const int backlog = 15;
 
-	Logger logg = create_logger();
-	if (logg == NULL) {
-		fprintf(stderr, "failed to create logger: %s\n",
-	  			strerror(errno));
-		goto RETURN_ERROR;
-	}	
+	WServer server;
+	int serv_fd;
 
-	if (argc != 3) {
-		log(logg, ERR, "usage: %s <host | null> <port>", argv[0]);
-		goto RETURN_ERROR;
-	}
+	logger = logger_create();
+	if (logger == NULL)
+		exit(EXIT_FAILURE);
 
-	if ( !strcmp(argv[1], "null") ) {
-		argv[1] = get_ipv6_address_interface(logg);
+	logger_use_default_form(logger);
 
-		if (argv[1] == NULL)
-			goto RETURN_ERROR;
-	}
-		
-	server_fd = server_create(argv[1], argv[2], SERVER_LISTEN_BACKLOG);
-	if (server_fd == -1) {
-		log(logg, ERR, "%s", net_util_error());
-		goto DESTROY_LOGGER;
-	}
-	
-	log(logg, INF, "server open at %s:%s", argv[1], argv[2]);
+	net_util_set_logger(logger);
+	wserver_set_logger(logger);
 
-	// do something.
+	hostname = get_hostname();
+	if (hostname == NULL)
+		crt("failed to get_hostname()");
 
-	log(logg, INF, "server closed.");
+	serv_fd = make_listener(hostname, (char *) service, backlog, true);
+	if (serv_fd == -1)
+		crt("failed to server_create()");
 
-	close(server_fd);
+	server = wserver_create(serv_fd);
+	if (server == NULL)
+		crt("failed to wserver_create()")
 
-	logger_destroy(logg);
+	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
+
+	if (wserver_start(server, NULL) == -1)
+		crt("failed to wserver_start()");
+
+	while (true) sleep(1);
+
+	wserver_stop(server);
+	wserver_destroy(server);
+
+	close(serv_fd);
+
+	logger_destroy(logger);
 
 	return 0;
-
-SERVER_DESTROY: close(server_fd);
-DESTROY_LOGGER:	logger_destroy(logg);
-RETURN_ERROR:	return -1;
 }
