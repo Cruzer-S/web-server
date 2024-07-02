@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
 	if (server == NULL)
 		crt("failed to wserver_create()")
 
-	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
+	msg("server running at %s:%s (%d)", hostname, service, backlog);
 
 	if (wserver_start(server, NULL) == -1)
 		crt("failed to wserver_start()");
