@@ -10,7 +10,7 @@
 
 #include "Cruzer-S/net-util/net-util.h"
 
-#include "wserver.h"
+#include "web_server.h"
 
 #define msg(...) log(logger, INFO, __VA_ARGS__)
 #define crt(...) log(logger, PCRTC, __VA_ARGS__), exit(EXIT_FAILURE);
@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
 	const char *service = "443";
 	const int backlog = 15;
 
-	WServer server;
+	WebServer server;
 	int serv_fd;
 
 	logger = logger_create();
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
 	logger_use_default_form(logger);
 
 	net_util_set_logger(logger);
-	wserver_set_logger(logger);
+	web_server_set_logger(logger);
 
 	hostname = get_hostname();
 	if (hostname == NULL)
@@ -71,19 +71,19 @@ int main(int argc, char *argv[])
 	if (serv_fd == -1)
 		crt("failed to server_create()");
 
-	server = wserver_create(serv_fd);
+	server = web_server_create(serv_fd);
 	if (server == NULL)
-		crt("failed to wserver_create()")
+		crt("failed to web_server_create()")
 
-	msg("server running at %s:%s (%d)", hostname, service, backlog);
+	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
 
-	if (wserver_start(server, NULL) == -1)
-		crt("failed to wserver_start()");
+	if (web_server_start(server) == -1)
+		crt("failed to web_server_start()");
 
 	while (true) sleep(1);
 
-	wserver_stop(server);
-	wserver_destroy(server);
+	web_server_stop(server);
+	web_server_destroy(server);
 
 	close(serv_fd);
 
