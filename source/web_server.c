@@ -10,7 +10,6 @@
 #include <sys/socket.h>
 
 #include "Cruzer-S/net-util/net-util.h"
-#include "Cruzer-S/list/list.h"
 #include "Cruzer-S/event-listener/event_listener.h"
 #include "Cruzer-S/logger/logger.h"
 #include "Cruzer-S/http/http.h"
@@ -337,6 +336,18 @@ int web_server_start(WebServer server)
 {
 	if (event_listener_start(server->listener) == -1)
 		return -1;
+
+	return 0;
+}
+
+int web_server_register_handler(
+	WebServer server, enum http_request_method method,
+	WebServerHandler handler
+) {
+	if (method < 0 || method > HTTP_REQUEST_UNKNOWN)
+		return -1;
+
+	server->callback[method] = handler;
 
 	return 0;
 }

@@ -8,8 +8,8 @@ struct request_data {
 	int fd;
 
 	struct http_request_header *header;
-	char *body;
-	size_t bodylen;
+
+	char *body; size_t bodylen;
 };
 
 typedef struct web_server *WebServer;
@@ -22,7 +22,8 @@ int web_server_start(WebServer server);
 void web_server_stop(WebServer server);
 
 int web_server_register_handler(
-	enum http_request_method method, WebServerHandler handler
+	WebServer server, enum http_request_method method,
+	WebServerHandler handler
 );
 
 void web_server_set_logger(Logger logger);
