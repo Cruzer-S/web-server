@@ -355,5 +355,4 @@ int web_server_register_handler(
 void web_server_stop(WebServer server)
 {
 	event_listener_stop(server->listener);
-
 }
