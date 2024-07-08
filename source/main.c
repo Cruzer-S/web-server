@@ -75,10 +75,10 @@ int main(int argc, char *argv[])
 	if (server == NULL)
 		crt("failed to web_server_create()")
 
-	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
-
 	if (web_server_start(server) == -1)
 		crt("failed to web_server_start()");
+
+	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
 
 	while (true) sleep(1);
 

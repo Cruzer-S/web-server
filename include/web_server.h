@@ -4,8 +4,16 @@
 #include "Cruzer-S/logger/logger.h"
 #include "Cruzer-S/http/http.h"
 
+struct request_data {
+	int fd;
+
+	struct http_request_header *header;
+	char *body;
+	size_t bodylen;
+};
+
 typedef struct web_server *WebServer;
-typedef void (*WebServerHandler)(int fd, struct http_request_header *, char *);
+typedef void (*WebServerHandler)(struct request_data );
 
 WebServer web_server_create(int serv_fd);
 void web_server_destroy(WebServer server);
