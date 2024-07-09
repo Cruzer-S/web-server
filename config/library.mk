@@ -3,3 +3,4 @@ Cruzer-S/http
 Cruzer-S/event-listener
 Cruzer-S/logger
 Cruzer-S/list
+Cruzer-S/linux-lib
