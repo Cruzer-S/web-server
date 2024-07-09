@@ -16,7 +16,7 @@
 
 static Logger logger = NULL;
 
-#define MAKE_ARG(S) ( (struct request_data) { 				\
+#define MAKE_ARG(S) (& (struct request_data) { 				\
 	.fd = (S)->fd,							\
 	.header = &(S)->header,						\
 	.body = (S)->body,						\
@@ -32,14 +32,17 @@ enum session_process {
 	SESSION_PROCESS_READ_HEADER,
 	SESSION_PROCESS_PARSE_HEADER,
 	SESSION_PROCESS_READ_BODY,
-	SESSION_PROCESS_DONE
+	SESSION_PROCESS_DONE,
+	SESSION_PROCESS_REARMING
 };
 
 struct web_server {
 	int listen_fd;
 	EventListener listener;
 
-	WebServerHandler callback[HTTP_REQUEST_UNKNOWN];
+	WebServerHandler callback;
+
+	WebServerConfig config;
 };
 
 typedef struct session {
@@ -49,8 +52,6 @@ typedef struct session {
 
 	struct http_request_header header;
 	size_t headerlen;
-
-	enum http_request_method method;
 
 	char *body;
 	size_t bodylen;
@@ -114,12 +115,7 @@ static int read_header(Session session)
 
 		int hlen = session->headerlen;
 		if (strstr(&buffer[OVER_ZERO(hlen - 4)], "\r\n\r\n"))
-		{
-			msg("read header succesffuly: %ld (ID: %d)\n%s",
-			    hlen, session->fd, session->header.buffer);
-
 			return hlen;
-		}
 
 		if (hlen == HTTP_HEADER_MAX_SIZE) {
 			err("header is too large! (ID: %d)", session->fd);
@@ -168,42 +164,38 @@ static int read_body(Session session)
 		}
 
 		session->readlen += readlen;
-		if (session->readlen == session->bodylen) {
-			msg("read body succesffuly: %ld (ID: %d)\n%s",
-			    session->bodylen, session->fd,
-       			    session->header.buffer);
-
+		if (session->readlen == session->bodylen)
 			return session->readlen;
-		}
 	}
 
 	return -1; // never reach
 }
 
-static enum http_request_method parse_header(Session session)
+int session_rearm(Session session)
 {
-	enum http_request_method method;
+	free(session->body); session->body = NULL;
+	session->readlen = session->bodylen = 0;
 
+	session->progress = SESSION_PROCESS_READ_BODY;
+
+	return 0;
+}
+
+static int parse_header(Session session)
+{
 	if (http_request_header_parse(&session->header) == -1)
-		goto RETURN_UNKNOWN;
-
-	method = http_get_method(&session->header);
-	if (method == HTTP_REQUEST_UNKNOWN)
-		goto RETURN_UNKNOWN;
+		return -1;
 
 	session->bodylen = parse_body_len(&session->header);
 	if (session->bodylen == -1)
 		return -1;
 	
-	return method;
-
-RETURN_UNKNOWN:	return HTTP_REQUEST_UNKNOWN;
+	return session->bodylen;
 }
 
 static void handle_client(int fd, void *ptr)
 {
 	Session session = ptr;
-	WebServerHandler handler;
 	int retval;
 
 	switch(session->progress) {
@@ -215,8 +207,7 @@ static void handle_client(int fd, void *ptr)
 		session->progress++;
 
 	case SESSION_PROCESS_PARSE_HEADER:
-		session->method = parse_header(session);
-		if (session->method == HTTP_REQUEST_UNKNOWN)
+		if (parse_header(session) == -1)
 			goto CLOSE_SESSION;
 
 		if (session->bodylen > 0) {
@@ -227,9 +218,6 @@ static void handle_client(int fd, void *ptr)
 		} else {
 			session->progress++;
 		}
-
-		msg("parse header successfully: %ld (ID: %d)",
-		     session->bodylen, session->fd);
 
 		session->progress++;
 		if (session->progress == SESSION_PROCESS_DONE)
@@ -246,16 +234,26 @@ static void handle_client(int fd, void *ptr)
 		session->progress++;
 
 	SESSION_PROCESS_DONE: case SESSION_PROCESS_DONE:
-		handler = session->server->callback[session->method];
-		if (handler == NULL) {
-			msg("callback does not registered (ID: %d)",
+		if (session->server->callback == NULL) {
+			err("callback does not registered (ID: %d)",
        			    session->fd);
 			goto FREE_BODY;
 		}
 
-		handler(MAKE_ARG(session));
+		session->server->callback(session->server, MAKE_ARG(session));
 
-		break;
+		session->progress++;
+
+	case SESSION_PROCESS_REARMING: {
+		struct http_header_field *field = http_find_field(
+			&session->header, "Connection"
+		);
+
+		if (field && strcmp(field->value, "keep-alive"))
+			goto FREE_BODY;
+
+		session_rearm(session);
+	}	break;
 	}
 
 	return ;
@@ -299,7 +297,7 @@ CLOSE_CLIENT:	close(clnt_fd);
 JUST_RETURN:	return;
 }
 
-WebServer web_server_create(int serv_fd)
+WebServer web_server_create(int serv_fd, WebServerConfig config)
 {
 	WebServer server = malloc(sizeof(struct web_server));
 	if (server == NULL)
@@ -315,8 +313,8 @@ WebServer web_server_create(int serv_fd)
 	server->listen_fd = serv_fd;
 	server->listener = listener;
 
-	for (int i = 0; i < HTTP_REQUEST_UNKNOWN; i++)
-		server->callback[i] = NULL;
+	server->callback = NULL;
+	server->config = config;
 
 	return server;
 
@@ -340,19 +338,17 @@ int web_server_start(WebServer server)
 	return 0;
 }
 
-int web_server_register_handler(
-	WebServer server, enum http_request_method method,
-	WebServerHandler handler
-) {
-	if (method < 0 || method > HTTP_REQUEST_UNKNOWN)
-		return -1;
-
-	server->callback[method] = handler;
-
-	return 0;
+void web_server_register_handler(WebServer server, WebServerHandler handler)
+{
+	server->callback = handler;
 }
 
 void web_server_stop(WebServer server)
 {
 	event_listener_stop(server->listener);
+}
+
+WebServerConfig web_server_get_config(WebServer server)
+{
+	return server->config;
 }

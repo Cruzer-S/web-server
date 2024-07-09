@@ -11,9 +11,10 @@
 #include "Cruzer-S/net-util/net-util.h"
 
 #include "web_server.h"
+#include "web_server_util.h"
 
 #define msg(...) log(logger, INFO, __VA_ARGS__)
-#define crt(...) log(logger, PCRTC, __VA_ARGS__), exit(EXIT_FAILURE);
+#define crt(...) log(logger, PCRTC, __VA_ARGS__), exit(EXIT_FAILURE)
 #define wrn(...) log(logger, WARN, __VA_ARGS__)
 
 Logger logger;
@@ -45,6 +46,33 @@ static char *get_hostname(void)
 	return hostname;
 }
 
+static void request_handler(WebServer server, struct request_data *data)
+{
+	struct http_request_header *header = data->header;
+	char *body = data->body;
+	size_t bodylen = data->bodylen;
+	int clnt_fd = data->fd;
+	char *file;
+
+	switch (http_get_method(header))
+	{
+	case HTTP_REQUEST_GET:
+		msg("client request(%s): %s (ID: %d)",
+      			"GET", header->url, clnt_fd);
+		if ( !strcmp(header->url, "/") )
+			file = "index.html";
+		else
+			file = header->url + 1;
+
+		ws_send_file(server, clnt_fd, file);
+
+		break;
+
+	default:
+		break;
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	char *hostname;
@@ -52,6 +80,7 @@ int main(int argc, char *argv[])
 	const int backlog = 15;
 
 	WebServer server;
+	struct web_server_config config;
 	int serv_fd;
 
 	logger = logger_create();
@@ -59,7 +88,6 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 
 	logger_use_default_form(logger);
-
 	net_util_set_logger(logger);
 	web_server_set_logger(logger);
 
@@ -71,16 +99,24 @@ int main(int argc, char *argv[])
 	if (serv_fd == -1)
 		crt("failed to server_create()");
 
-	server = web_server_create(serv_fd);
+	config = (struct web_server_config) {
+		.server_name = "mythos web server",
+		.basedir = "resources"
+	};
+
+	server = web_server_create(serv_fd, &config);
 	if (server == NULL)
-		crt("failed to web_server_create()")
+		crt("failed to web_server_create()");
+
+	web_server_register_handler(server, request_handler);
 
 	if (web_server_start(server) == -1)
 		crt("failed to web_server_start()");
 
 	msg("server running at %s:%s (%d)\n", hostname, service, backlog);
 
-	while (true) sleep(1);
+	while (true)
+		sleep(1);
 
 	web_server_stop(server);
 	web_server_destroy(server);
