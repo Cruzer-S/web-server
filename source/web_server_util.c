@@ -30,7 +30,7 @@ int ws_send_file(WebServer server, int fd, char *filename)
 {
 	char filepath[PATH_MAX];
 	size_t fsize; char fsize_str[32];
-	char *header;
+	struct http_response_header *header;
 	WebServerConfig config;
 
 	config = web_server_get_config(server);
@@ -61,7 +61,7 @@ int ws_send_file(WebServer server, int fd, char *filename)
 	if (header == NULL)
 		return -1;
 
-	int headerlen = strlen(header);
+	int headerlen = strlen(header->buffer);
 	int writelen = 0;
 	while (writelen < headerlen) {
 		int retval = write(fd, header + writelen, headerlen);
