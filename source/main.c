@@ -80,7 +80,7 @@ int main(int argc, char *argv[])
 	const int backlog = 15;
 
 	WebServer server;
-	struct web_server_config config;
+	WebServerConfig config;
 	int serv_fd;
 
 	logger = logger_create();
@@ -99,12 +99,12 @@ int main(int argc, char *argv[])
 	if (serv_fd == -1)
 		crt("failed to server_create()");
 
-	config = (struct web_server_config) {
+	config = &(struct web_server_config) {
 		.server_name = "mythos web server",
 		.basedir = "resources"
 	};
 
-	server = web_server_create(serv_fd, &config);
+	server = web_server_create(serv_fd, config);
 	if (server == NULL)
 		crt("failed to web_server_create()");
 

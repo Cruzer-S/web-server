@@ -9,8 +9,8 @@
 
 #include <sys/socket.h>
 
+#include "Cruzer-S/event-handler/event-handler.h"
 #include "Cruzer-S/net-util/net-util.h"
-#include "Cruzer-S/event-listener/event_listener.h"
 #include "Cruzer-S/logger/logger.h"
 #include "Cruzer-S/http/http.h"
 
@@ -38,7 +38,7 @@ enum session_process {
 
 struct web_server {
 	int listen_fd;
-	EventListener listener;
+	EventHandler handler;
 
 	WebServerHandler callback;
 
@@ -87,7 +87,7 @@ static void session_close(Session session)
 {
 	int fd = session->fd;
 
-	event_listener_del(session->server->listener, session->fd);
+	event_handler_del(session->server->handler, session->fd);
 	if (session->body != NULL) free(session->body);
 	free(session);
 
@@ -265,7 +265,7 @@ CLOSE_SESSION:	session_close(session);
 static void accept_client(int __, void *arg)
 {
 	WebServer server = arg;
-	EventListener listener = server->listener;
+	EventHandler handler = server->handler;
 
 	int listen_fd = server->listen_fd;
 
@@ -281,7 +281,7 @@ static void accept_client(int __, void *arg)
 	if (session == NULL)
 		goto CLOSE_CLIENT;
 
-	if (event_listener_add(listener, clnt_fd, session, handle_client))
+	if (event_handler_add(handler, true, clnt_fd, session, handle_client))
 		goto CLOSE_SESSION;
 
 	session->body = NULL;
@@ -303,15 +303,15 @@ WebServer web_server_create(int serv_fd, WebServerConfig config)
 	if (server == NULL)
 		goto RETURN_NULL;
 
-	EventListener listener = event_listener_create();
-	if (listener == NULL)
+	EventHandler handler = event_handler_create();
+	if (handler == NULL)
 		goto FREE_SERVER;
 
-	if (event_listener_add(listener, serv_fd, server, accept_client))
+	if (event_handler_add(handler, true, serv_fd, server, accept_client))
 		goto FREE_SERVER;
 
 	server->listen_fd = serv_fd;
-	server->listener = listener;
+	server->handler = handler;
 
 	server->callback = NULL;
 	server->config = config;
@@ -324,15 +324,15 @@ RETURN_NULL:	return NULL;
 
 void web_server_destroy(WebServer server)
 {
-	event_listener_del(server->listener, server->listen_fd);
-	event_listener_destroy(server->listener);
+	event_handler_del(server->handler, server->listen_fd);
+	event_handler_destroy(server->handler);
 
 	free(server);
 }
 
 int web_server_start(WebServer server)
 {
-	if (event_listener_start(server->listener) == -1)
+	if (event_handler_start(server->handler) == -1)
 		return -1;
 
 	return 0;
@@ -345,7 +345,7 @@ void web_server_register_handler(WebServer server, WebServerHandler handler)
 
 void web_server_stop(WebServer server)
 {
-	event_listener_stop(server->listener);
+	event_handler_stop(server->handler);
 }
 
 WebServerConfig web_server_get_config(WebServer server)
