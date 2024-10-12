@@ -108,6 +108,9 @@ static int read_header(Session session)
 			return -1;
 		}
 
+		if (readlen == 0)
+			return -1;
+
 		session->headerlen += readlen;
 		session->header.buffer[session->headerlen] = '\0';
 
@@ -157,6 +160,9 @@ static int read_body(Session session)
 			return -1;
 		}
 
+		if (readlen == 0)
+			return -1;
+
 		session->readlen += readlen;
 		if (session->readlen == session->bodylen)
 			return session->readlen;
@@ -169,8 +175,9 @@ int session_rearm(Session session)
 {
 	free(session->body); session->body = NULL;
 	session->readlen = session->bodylen = 0;
+	session->headerlen = 0;
 
-	session->progress = SESSION_PROCESS_READ_BODY;
+	session->progress = SESSION_PROCESS_READ_HEADER;
 
 	return 0;
 }
@@ -195,20 +202,20 @@ static void handle_client(EventObject object)
 	switch(session->progress) {
 	case SESSION_PROCESS_READ_HEADER:
 		retval = read_header(session);
-		if (retval == -1)	goto CLOSE_FD;
+		if (retval == -1)	goto DELETE_EVENT;
 		if (retval == 0)	break;
 
 		session->progress++;
 
 	case SESSION_PROCESS_PARSE_HEADER:
 		if (parse_header(session) == -1)
-			goto CLOSE_FD;
+			goto DELETE_EVENT;
 
 		if (session->bodylen > 0) {
 			session->body = malloc(session->bodylen);
 
 			if (session->body == NULL)
-				goto CLOSE_FD;
+				goto DELETE_EVENT;
 		} else {
 			session->progress++;
 		}
@@ -240,10 +247,7 @@ static void handle_client(EventObject object)
 			&session->header, "Connection"
 		);
 
-		if (field == NULL)
-			goto FREE_BODY;
-
-		if (field && strcmp(field->value, "keep-alive"))
+		if ( !field || (field && strcmp(field->value, "keep-alive")) )
 			goto FREE_BODY;
 
 		session_rearm(session);
@@ -252,11 +256,10 @@ static void handle_client(EventObject object)
 
 	return ;
 
+FREE_BODY:	free(session->body); session->body = NULL;
 DELETE_EVENT:	event_handler_del(session->server->handler, session->object);
 CLOSE_FD:	close(event_object_get_fd(session->object));
-FREE_BODY:	free(session->body); session->body = NULL;
 DESTROY_SESSION:session_destroy(session);
-		
 }
 
 static void accept_client(EventObject arg)

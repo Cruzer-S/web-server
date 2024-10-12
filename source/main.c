@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
 	if (web_server_start(server) == -1)
 		crtc("failed to web_server_start()");
 
-	info("server running at %s:%s (%d)\n", hostname, service, backlog);
+	info("server running at %s:%s (%d)", hostname, service, backlog);
 
 	while (true)
 		sleep(1);
