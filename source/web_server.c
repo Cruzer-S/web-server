@@ -14,7 +14,7 @@
 #include "Cruzer-S/http/http.h"
 
 #define MAKE_ARG(S) (& (struct request_data) { 				\
-	.fd = (S)->fd,							\
+	.fd = event_object_get_fd((S)->object),				\
 	.header = &(S)->header,						\
 	.body = (S)->body,						\
 	.bodylen = (S)->bodylen						\
@@ -34,18 +34,17 @@ enum session_process {
 };
 
 struct web_server {
-	int listen_fd;
 	EventHandler handler;
 
 	WebServerHandler callback;
 
 	WebServerConfig config;
+
+	EventObject object;
 };
 
 typedef struct session {
 	WebServer server;
-
-	int fd;
 
 	struct http_request_header header;
 	size_t headerlen;
@@ -54,42 +53,51 @@ typedef struct session {
 	size_t bodylen;
 	size_t readlen;
 
+	EventObject object;
+
 	enum session_process progress;
 } *Session;
 
-static Session session_create(int fd, WebServer server)
+static void handle_client(EventObject object);
+
+static Session session_create(int fd)
 {
-	Session session = malloc(sizeof(struct session));
+	Session session;
+
+	session = malloc(sizeof(struct session));
 	if (session == NULL)
 		goto RETURN_NULL;
 
-	session->fd = fd;
-	session->server = server;
-
+	session->server = NULL;
 	session->body = NULL;
 	session->headerlen = session->bodylen = 0;
-	
+	session->progress = SESSION_PROCESS_READ_HEADER;
+
+	session->object = event_object_create(
+		fd, true, session, handle_client
+	);
+	if (session->object == NULL)
+		goto FREE_SESSION;
+
 	return session;
 
-FREE_DATA:	free(session);
+FREE_SESSION:	free(session);
 RETURN_NULL:	return NULL;
 }
 
-static void session_close(Session session)
+static void session_destroy(Session session)
 {
-	int fd = session->fd;
+	int fd = event_object_get_fd(session->object);
 
-	event_handler_del(session->server->handler, session->fd);
-	if (session->body != NULL) free(session->body);
+	event_object_destroy(session->object);
+
 	free(session);
-
-	close(fd);
 }
 
 static int read_header(Session session)
 {
 	char *buffer = session->header.buffer;
-	int fd = session->fd;
+	int fd = event_object_get_fd(session->object);
 
 	while (true) {
 		ssize_t readlen = recv(fd, buffer + session->headerlen, 1, 0);
@@ -137,7 +145,7 @@ static long int parse_body_len(struct http_request_header *header)
 static int read_body(Session session)
 {
 	char *buffer = session->body;
-	int fd = session->fd;
+	int fd = event_object_get_fd(session->object);
 
 	while (true) {
 		ssize_t readlen = recv(fd, &buffer[session->readlen],
@@ -179,28 +187,28 @@ static int parse_header(Session session)
 	return session->bodylen;
 }
 
-static void handle_client(int fd, void *ptr)
+static void handle_client(EventObject object)
 {
-	Session session = ptr;
+	Session session = event_object_get_arg(object);
 	int retval;
 
 	switch(session->progress) {
 	case SESSION_PROCESS_READ_HEADER:
 		retval = read_header(session);
-		if (retval == -1)	goto CLOSE_SESSION;
+		if (retval == -1)	goto CLOSE_FD;
 		if (retval == 0)	break;
 
 		session->progress++;
 
 	case SESSION_PROCESS_PARSE_HEADER:
 		if (parse_header(session) == -1)
-			goto CLOSE_SESSION;
+			goto CLOSE_FD;
 
 		if (session->bodylen > 0) {
 			session->body = malloc(session->bodylen);
 
 			if (session->body == NULL)
-				goto CLOSE_SESSION;
+				goto CLOSE_FD;
 		} else {
 			session->progress++;
 		}
@@ -232,6 +240,9 @@ static void handle_client(int fd, void *ptr)
 			&session->header, "Connection"
 		);
 
+		if (field == NULL)
+			goto FREE_BODY;
+
 		if (field && strcmp(field->value, "keep-alive"))
 			goto FREE_BODY;
 
@@ -241,40 +252,39 @@ static void handle_client(int fd, void *ptr)
 
 	return ;
 
+DELETE_EVENT:	event_handler_del(session->server->handler, session->object);
+CLOSE_FD:	close(event_object_get_fd(session->object));
 FREE_BODY:	free(session->body); session->body = NULL;
-CLOSE_SESSION:	session_close(session);
+DESTROY_SESSION:session_destroy(session);
+		
 }
 
-static void accept_client(int __, void *arg)
+static void accept_client(EventObject arg)
 {
-	WebServer server = arg;
+	WebServer server = event_object_get_arg(arg);
 	EventHandler handler = server->handler;
 
-	int listen_fd = server->listen_fd;
+	int listen_fd = event_object_get_fd(server->object);
 
 	int clnt_fd = accept(listen_fd, NULL, NULL);
 	if (clnt_fd == -1)
 		goto JUST_RETURN;
 
-	if (fcntl_set_nonblocking(clnt_fd) == -1) {
-		goto CLOSE_CLIENT;
-	}
+	if (fcntl_set_nonblocking(clnt_fd) == -1)
+		goto CLOSE_FD;
 
-	Session session = session_create(clnt_fd, server);
+	Session session = session_create(clnt_fd);
 	if (session == NULL)
-		goto CLOSE_CLIENT;
+		goto CLOSE_FD;
 
-	if (event_handler_add(handler, true, clnt_fd, session, handle_client))
-		goto CLOSE_SESSION;
-
-	session->body = NULL;
-	session->headerlen = session->bodylen = 0;
-	session->progress = SESSION_PROCESS_READ_HEADER;
+	session->server = server;
+	if (event_handler_add(server->handler, session->object) == -1)
+		goto DESTROY_SESSION;
 
 	return ;
 
-CLOSE_SESSION:	session_close(session);
-CLOSE_CLIENT:	close(clnt_fd);
+DESTROY_SESSION:session_destroy(session);
+CLOSE_FD:	close(clnt_fd);
 JUST_RETURN:	return;
 }
 
@@ -284,28 +294,30 @@ WebServer web_server_create(int serv_fd, WebServerConfig config)
 	if (server == NULL)
 		goto RETURN_NULL;
 
-	EventHandler handler = event_handler_create();
-	if (handler == NULL)
+	server->handler = event_handler_create();
+	if (server->handler == NULL)
 		goto FREE_SERVER;
 
-	if (event_handler_add(handler, true, serv_fd, server, accept_client))
-		goto FREE_SERVER;
-
-	server->listen_fd = serv_fd;
-	server->handler = handler;
+	server->object = event_object_create(
+		serv_fd, true, server, accept_client
+	);
+	if (server->object == NULL)
+		goto DESTROY_HANDLER;	
 
 	server->callback = NULL;
 	server->config = config;
 
 	return server;
 
+DESTROY_HANDLER:event_handler_destroy(server->handler);
 FREE_SERVER:	free(server);
 RETURN_NULL:	return NULL;
 }
 
 void web_server_destroy(WebServer server)
 {
-	event_handler_del(server->handler, server->listen_fd);
+	event_handler_del(server->handler, server->object);
+	event_object_destroy(server->object);
 	event_handler_destroy(server->handler);
 
 	free(server);
@@ -315,6 +327,11 @@ int web_server_start(WebServer server)
 {
 	if (event_handler_start(server->handler) == -1)
 		return -1;
+
+	if (event_handler_add(server->handler, server->object) == -1) {
+		event_handler_stop(server->handler);
+		return -1;
+	}
 
 	return 0;
 }
