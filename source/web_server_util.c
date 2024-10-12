@@ -4,6 +4,7 @@
 #include "Cruzer-S/net-util/net-util.h"
 #include "Cruzer-S/linux-lib/file.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>

@@ -1,8 +1,9 @@
 #ifndef WEB_SERVER_H__
 #define WEB_SERVER_H__
 
-#include "Cruzer-S/logger/logger.h"
 #include "Cruzer-S/http/http.h"
+
+#include <stddef.h> // size_t
 
 typedef struct web_server_config {
 	char *server_name;
@@ -27,8 +28,6 @@ int web_server_start(WebServer server);
 void web_server_stop(WebServer server);
 
 void web_server_register_handler(WebServer server, WebServerHandler handler);
-
-void web_server_set_logger(Logger logger);
 
 WebServerConfig web_server_get_config(WebServer );
 

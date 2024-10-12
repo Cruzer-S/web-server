@@ -11,10 +11,7 @@
 
 #include "Cruzer-S/event-handler/event-handler.h"
 #include "Cruzer-S/net-util/net-util.h"
-#include "Cruzer-S/logger/logger.h"
 #include "Cruzer-S/http/http.h"
-
-static Logger logger = NULL;
 
 #define MAKE_ARG(S) (& (struct request_data) { 				\
 	.fd = (S)->fd,							\
@@ -60,11 +57,6 @@ typedef struct session {
 	enum session_process progress;
 } *Session;
 
-void web_server_set_logger(Logger logg)
-{
-	logger = logg;
-}
-
 static Session session_create(int fd, WebServer server)
 {
 	Session session = malloc(sizeof(struct session));
@@ -104,8 +96,6 @@ static int read_header(Session session)
 		if (readlen == -1) {
 			if (errno == EAGAIN)
 				return 0;
-			
-			msg("client disconnected (ID: %d)", fd);
 
 			return -1;
 		}
@@ -117,10 +107,8 @@ static int read_header(Session session)
 		if (strstr(&buffer[OVER_ZERO(hlen - 4)], "\r\n\r\n"))
 			return hlen;
 
-		if (hlen == HTTP_HEADER_MAX_SIZE) {
-			err("header is too large! (ID: %d)", session->fd);
+		if (hlen == HTTP_HEADER_MAX_SIZE)
 			return -1;
-		}
 	}
 
 	return -1; // never reach
@@ -157,8 +145,6 @@ static int read_body(Session session)
 		if (readlen == -1) {
 			if (errno == EAGAIN)
 				return 0;
-			
-			msg("client disconnected (ID: %d)", fd);
 
 			return -1;
 		}
@@ -234,11 +220,8 @@ static void handle_client(int fd, void *ptr)
 		session->progress++;
 
 	SESSION_PROCESS_DONE: case SESSION_PROCESS_DONE:
-		if (session->server->callback == NULL) {
-			err("callback does not registered (ID: %d)",
-       			    session->fd);
+		if (session->server->callback == NULL)
 			goto FREE_BODY;
-		}
 
 		session->server->callback(session->server, MAKE_ARG(session));
 
@@ -287,8 +270,6 @@ static void accept_client(int __, void *arg)
 	session->body = NULL;
 	session->headerlen = session->bodylen = 0;
 	session->progress = SESSION_PROCESS_READ_HEADER;
-
-	msg("client accept (ID: %d)", clnt_fd);
 
 	return ;
 
