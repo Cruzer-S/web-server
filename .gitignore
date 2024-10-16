@@ -63,3 +63,4 @@ resources/cert/
 makefile
 include/*/
 .cache/
+certs/
