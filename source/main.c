@@ -45,25 +45,24 @@ static char *get_hostname(void)
 	return hostname;
 }
 
-static void request_handler(WebServer server, struct request_data *data)
+static void request_handler(Session session)
 {
-	struct http_request_header *header = data->header;
-	char *body = data->body;
-	size_t bodylen = data->bodylen;
-	int clnt_fd = data->fd;
+	struct http_request_header *header = &session->header;
+	char *body = session->body;
+	size_t bodylen = session->bodylen;
 	char *file;
 
 	switch (http_get_method(header))
 	{
 	case HTTP_REQUEST_GET:
 		info("client request(%s): %s (ID: %d)",
-      		     "GET", header->url, clnt_fd);
+      		     "GET", header->url, session->id);
 		if ( !strcmp(header->url, "/") )
 			file = "index.html";
 		else
 			file = header->url + 1;
 
-		ws_send_file(server, clnt_fd, file);
+		ws_send_file(session, file);
 
 		break;
 
@@ -75,12 +74,10 @@ static void request_handler(WebServer server, struct request_data *data)
 int main(int argc, char *argv[])
 {
 	char *hostname;
-	const char *service = "443";
-	const int backlog = 15;
+	char *service = "443";
 
 	WebServer server;
 	WebServerConfig config;
-	int serv_fd;
 
 	if ( !logger_initialize() )
 		perror("failed to logger_initialize(): ");
@@ -88,17 +85,19 @@ int main(int argc, char *argv[])
 	hostname = get_hostname();
 	if (hostname == NULL)
 		crtc("failed to get_hostname()");
-
-	serv_fd = make_listener(hostname, (char *) service, backlog, true);
-	if (serv_fd == -1)
-		crtc("failed to server_create()");
-
+	
 	config = &(struct web_server_config) {
+		.hostname = hostname,
+		.service = service,
+
 		.server_name = "mythos web server",
-		.basedir = "resources"
+		.basedir = "resources",
+		.use_ssl = true,
+		.cert_key = "certs/fullchain.pem",
+		.priv_key = "certs/privkey.pem"
 	};
 
-	server = web_server_create(serv_fd, config);
+	server = web_server_create(config);
 	if (server == NULL)
 		crtc("failed to web_server_create()");
 
@@ -107,15 +106,13 @@ int main(int argc, char *argv[])
 	if (web_server_start(server) == -1)
 		crtc("failed to web_server_start()");
 
-	info("server running at %s:%s (%d)", hostname, service, backlog);
+	info("server running at %s:%s", hostname, service);
 
 	while (true)
 		sleep(1);
 
 	web_server_stop(server);
 	web_server_destroy(server);
-
-	close(serv_fd);
 
 	return 0;
 }

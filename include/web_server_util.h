@@ -3,6 +3,6 @@
 
 #include "web_server.h"
 
-int ws_send_file(WebServer server, int fd, char *filename);
+int ws_send_file(Session session, char *filename);
 
 #endif

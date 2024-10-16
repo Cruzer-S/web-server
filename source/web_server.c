@@ -9,6 +9,9 @@
 
 #include <sys/socket.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include "Cruzer-S/event-handler/event-handler.h"
 #include "Cruzer-S/net-util/net-util.h"
 #include "Cruzer-S/http/http.h"
@@ -41,37 +44,39 @@ struct web_server {
 	WebServerConfig config;
 
 	EventObject object;
+
+	SSL_CTX *ctx;
 };
 
-typedef struct session {
+typedef struct _session {
+	struct session _;
+
 	WebServer server;
 
-	struct http_request_header header;
-	size_t headerlen;
-
-	char *body;
-	size_t bodylen;
 	size_t readlen;
 
 	EventObject object;
 
+	SSL *ssl;
+
 	enum session_process progress;
-} *Session;
+} *_Session;
 
 static void handle_client(EventObject object);
 
-static Session session_create(int fd)
+static _Session session_create(int fd, SSL_CTX *ctx)
 {
-	Session session;
+	_Session session;
 
-	session = malloc(sizeof(struct session));
+	session = malloc(sizeof(struct _session));
 	if (session == NULL)
 		goto RETURN_NULL;
 
 	session->server = NULL;
-	session->body = NULL;
-	session->headerlen = session->bodylen = 0;
+	session->_.body = NULL;
+	session->_.headerlen = session->_.bodylen = 0;
 	session->progress = SESSION_PROCESS_READ_HEADER;
+
 
 	session->object = event_object_create(
 		fd, true, session, handle_client
@@ -79,42 +84,109 @@ static Session session_create(int fd)
 	if (session->object == NULL)
 		goto FREE_SESSION;
 
+	if (ctx) {
+		session->ssl = SSL_new(ctx);
+		if (session->ssl == NULL)
+			goto DESTROY_OBJECT;
+
+		if (SSL_set_fd(session->ssl, fd) != 1)
+			goto FREE_SSL;
+
+	} else {
+		session->ssl = NULL;
+	}
+
 	return session;
 
+FREE_SSL:	SSL_free(session->ssl);
+DESTROY_OBJECT:	event_object_destroy(session->object);
 FREE_SESSION:	free(session);
 RETURN_NULL:	return NULL;
 }
 
-static void session_destroy(Session session)
+static void session_destroy(_Session session)
 {
 	int fd = event_object_get_fd(session->object);
+
+	if (session->ssl)
+		SSL_free(session->ssl);
 
 	event_object_destroy(session->object);
 
 	free(session);
 }
 
-static int read_header(Session session)
+int session_write(_Session session, char *buffer, int size)
 {
-	char *buffer = session->header.buffer;
-	int fd = event_object_get_fd(session->object);
+	ssize_t len;
 
-	while (true) {
-		ssize_t readlen = recv(fd, buffer + session->headerlen, 1, 0);
-		if (readlen == -1) {
-			if (errno == EAGAIN)
+	if (session->ssl) {
+		len = SSL_write(session->ssl, buffer, size);
+
+		if (len <= 0)
+			return -1;
+	} else {
+		int fd = event_object_get_fd(session->object);
+
+		len = write(fd, buffer, size);
+		if (len == -1)
+			return -1;
+	}
+
+	return len;
+}
+
+int session_read(_Session session, char *buffer, int size)
+{
+	ssize_t len;
+
+	if (session->ssl) {
+		len = SSL_read(session->ssl, buffer, size);
+
+		if (len <= 0) {
+			int ret = SSL_get_error(session->ssl, len);
+			if (ret == SSL_ERROR_WANT_READ)
+				return -1;
+
+			if (ret == SSL_ERROR_ZERO_RETURN)
 				return 0;
 
-			return -1;
+			return -2;
+		}
+	} else {
+		int fd = event_object_get_fd(session->object);
+
+		len = recv(fd, buffer, size, 0);
+		if (len == -1) {
+			if (errno == EAGAIN)
+				return -1;
+
+			return -2;
 		}
 
-		if (readlen == 0)
+		if (len == 0)
+			return 0;
+	}
+
+	return len;
+}
+
+static int read_header(_Session session)
+{
+	char *buffer = session->_.header.buffer;
+	int len;
+
+	while (true) {
+		len = session_read(session, buffer + session->_.headerlen, 1);
+		if (len == -1)
+			return 0;
+		if (len == -2)
 			return -1;
 
-		session->headerlen += readlen;
-		session->header.buffer[session->headerlen] = '\0';
+		session->_.headerlen += len;
+		session->_.header.buffer[session->_.headerlen] = '\0';
 
-		int hlen = session->headerlen;
+		int hlen = session->_.headerlen;
 		if (strstr(&buffer[OVER_ZERO(hlen - 4)], "\r\n\r\n"))
 			return hlen;
 
@@ -145,14 +217,16 @@ static long int parse_body_len(struct http_request_header *header)
 	return bodylen;
 }
 
-static int read_body(Session session)
+static int read_body(_Session session)
 {
-	char *buffer = session->body;
+	char *buffer = session->_.body;
 	int fd = event_object_get_fd(session->object);
 
 	while (true) {
-		ssize_t readlen = recv(fd, &buffer[session->readlen],
-				       session->bodylen - session->readlen, 0);
+		ssize_t readlen = recv(
+			fd, &buffer[session->readlen],
+			session->_.bodylen - session->readlen, 0
+		);
 		if (readlen == -1) {
 			if (errno == EAGAIN)
 				return 0;
@@ -164,39 +238,39 @@ static int read_body(Session session)
 			return -1;
 
 		session->readlen += readlen;
-		if (session->readlen == session->bodylen)
+		if (session->readlen == session->_.bodylen)
 			return session->readlen;
 	}
 
 	return -1; // never reach
 }
 
-int session_rearm(Session session)
+int session_rearm(_Session session)
 {
-	free(session->body); session->body = NULL;
-	session->readlen = session->bodylen = 0;
-	session->headerlen = 0;
+	free(session->_.body); session->_.body = NULL;
+	session->readlen = session->_.bodylen = 0;
+	session->_.headerlen = 0;
 
 	session->progress = SESSION_PROCESS_READ_HEADER;
 
 	return 0;
 }
 
-static int parse_header(Session session)
+static int parse_header(_Session session)
 {
-	if (http_request_header_parse(&session->header) == -1)
+	if (http_request_header_parse(&session->_.header) == -1)
 		return -1;
 
-	session->bodylen = parse_body_len(&session->header);
-	if (session->bodylen == -1)
+	session->_.bodylen = parse_body_len(&session->_.header);
+	if (session->_.bodylen == -1)
 		return -1;
 	
-	return session->bodylen;
+	return session->_.bodylen;
 }
 
 static void handle_client(EventObject object)
 {
-	Session session = event_object_get_arg(object);
+	_Session session = event_object_get_arg(object);
 	int retval;
 
 	switch(session->progress) {
@@ -211,10 +285,10 @@ static void handle_client(EventObject object)
 		if (parse_header(session) == -1)
 			goto DELETE_EVENT;
 
-		if (session->bodylen > 0) {
-			session->body = malloc(session->bodylen);
+		if (session->_.bodylen > 0) {
+			session->_.body = malloc(session->_.bodylen);
 
-			if (session->body == NULL)
+			if (session->_.body == NULL)
 				goto DELETE_EVENT;
 		} else {
 			session->progress++;
@@ -238,13 +312,13 @@ static void handle_client(EventObject object)
 		if (session->server->callback == NULL)
 			goto FREE_BODY;
 
-		session->server->callback(session->server, MAKE_ARG(session));
+		session->server->callback(&session->_);
 
 		session->progress++;
 
 	case SESSION_PROCESS_REARMING: {
 		struct http_header_field *field = http_find_field(
-			&session->header, "Connection"
+			&session->_.header, "Connection"
 		);
 
 		if ( !field || (field && strcmp(field->value, "keep-alive")) )
@@ -256,7 +330,7 @@ static void handle_client(EventObject object)
 
 	return ;
 
-FREE_BODY:	free(session->body); session->body = NULL;
+FREE_BODY:	free(session->_.body); session->_.body = NULL;
 DELETE_EVENT:	event_handler_del(session->server->handler, session->object);
 CLOSE_FD:	close(event_object_get_fd(session->object));
 DESTROY_SESSION:session_destroy(session);
@@ -276,9 +350,27 @@ static void accept_client(EventObject arg)
 	if (fcntl_set_nonblocking(clnt_fd) == -1)
 		goto CLOSE_FD;
 
-	Session session = session_create(clnt_fd);
+	_Session session = session_create(clnt_fd, server->ctx);
 	if (session == NULL)
 		goto CLOSE_FD;
+
+	if (server->ctx) {
+		while (true) {
+			int ret = SSL_accept(session->ssl);
+			if (ret == 1)
+				break;
+
+			ret = SSL_get_error(session->ssl, ret);
+			if (ret == SSL_ERROR_WANT_READ 
+			 || ret == SSL_ERROR_WANT_WRITE)
+				continue;
+
+			char buffer[256];
+			printf("%s\n", ERR_error_string(ret, buffer));
+
+			goto DESTROY_SESSION;
+		}
+	}
 
 	session->server = server;
 	if (event_handler_add(server->handler, session->object) == -1)
@@ -291,34 +383,86 @@ CLOSE_FD:	close(clnt_fd);
 JUST_RETURN:	return;
 }
 
-WebServer web_server_create(int serv_fd, WebServerConfig config)
+static int web_server_init_ssl(WebServer server)
+{
+	int retval;
+
+	server->ctx = SSL_CTX_new(TLS_method());
+	if (server->ctx == NULL)
+		goto RETURN_ERR;
+
+	retval = SSL_CTX_use_certificate_chain_file(
+		server->ctx, server->config->cert_key
+	);
+	if (retval != 1)
+		goto FREE_SSL_CTX;
+
+	retval = SSL_CTX_use_PrivateKey_file(
+		server->ctx, server->config->priv_key, SSL_FILETYPE_PEM
+	);
+	if (retval != 1)
+		goto FREE_SSL_CTX;
+
+
+	if (SSL_CTX_check_private_key(server->ctx) != 1)
+		goto FREE_SSL_CTX;
+
+	return 0;
+
+FREE_SSL_CTX:	SSL_CTX_free(server->ctx);
+RETURN_ERR:	return -1;
+}
+
+WebServer web_server_create(WebServerConfig config)
 {
 	WebServer server = malloc(sizeof(struct web_server));
 	if (server == NULL)
 		goto RETURN_NULL;
 
-	server->handler = event_handler_create();
-	if (server->handler == NULL)
-		goto FREE_SERVER;
-
-	server->object = event_object_create(
-		serv_fd, true, server, accept_client
-	);
-	if (server->object == NULL)
-		goto DESTROY_HANDLER;	
-
-	server->callback = NULL;
 	server->config = config;
 
+	if (server->config->use_ssl) {
+ 		if (web_server_init_ssl(server) == -1)
+			goto FREE_SERVER;
+	} else {
+		server->ctx = NULL;
+	}
+
+	int fd = make_listener(config->hostname, config->service, 15, true);
+	if (fd == -1)
+		goto FREE_SSL;
+
+	server->handler = event_handler_create();
+	if (server->handler == NULL)
+		goto CLOSE_FD;
+
+	server->object = event_object_create(
+		fd, true, server, accept_client
+	);
+	if (server->object == NULL)
+		goto DESTROY_HANDLER;
+
+	server->callback = NULL;
+
+	
 	return server;
 
 DESTROY_HANDLER:event_handler_destroy(server->handler);
+CLOSE_FD:	close(fd);
+FREE_SSL:	if (server->ctx)
+			SSL_CTX_free(server->ctx);
 FREE_SERVER:	free(server);
 RETURN_NULL:	return NULL;
 }
 
 void web_server_destroy(WebServer server)
 {
+	if (server->ctx)
+		SSL_CTX_free(server->ctx);
+
+	int fd = event_object_get_fd(server->object);
+	close(fd);
+
 	event_handler_del(server->handler, server->object);
 	event_object_destroy(server->object);
 	event_handler_destroy(server->handler);
