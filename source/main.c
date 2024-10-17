@@ -18,33 +18,6 @@
 #define crtc(...) log(PCRTC, __VA_ARGS__), exit(EXIT_FAILURE)
 #define warn(...) log(WARN, __VA_ARGS__)
 
-static char *get_hostname(void)
-{
-	char *hostname;
-
-	struct list *address = get_interface_address(
-		AF_INET, IFF_UP, IFF_LOOPBACK
-	);
-
-	if (LIST_IS_EMPTY(address)) {
-		warn("failed to get interface address");
-		return NULL;
-	}
-
-	LIST_FOREACH_ENTRY(address, addr, struct address_data_node, list) {
-		hostname = get_host_from_address(
-			&addr->address, NI_NUMERICHOST
-		);
-
-		if (hostname != NULL)
-			break;
-	}
-
-	free_interface_address(address);
-
-	return hostname;
-}
-
 static void request_handler(Session session)
 {
 	struct http_request_header *header = &session->header;
@@ -90,7 +63,7 @@ int main(int argc, char *argv[])
 	if ( !logger_initialize() )
 		perror("failed to logger_initialize(): ");
 
-	hostname = get_hostname();
+	hostname = get_hostname(AF_INET);
 	if (hostname == NULL)
 		crtc("failed to get_hostname()");
 	
