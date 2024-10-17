@@ -20,15 +20,18 @@ typedef struct web_server_config {
 	};
 } *WebServerConfig;
 
-typedef struct session {
-	int id;
+#define SESSION_MEMBER { 			\
+	int id;					\
+	struct http_request_header header;	\
+	size_t headerlen;			\
+						\
+	char *body;				\
+	size_t bodylen;				\
+}
 
-	struct http_request_header header;
-	size_t headerlen;
-
-	char *body;
-	size_t bodylen;
-} *Session;
+typedef struct session
+	SESSION_MEMBER
+ *Session;
 
 typedef struct web_server *WebServer;
 typedef void (*WebServerHandler)(Session );

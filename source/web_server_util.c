@@ -1,9 +1,9 @@
 #include "web_server_util.h"
 
+#include "web_server_private.h"
+
 #include "Cruzer-S/http/http.h"
 #include "Cruzer-S/linux-lib/file.h"
-#include "Cruzer-S/event-handler/event-handler.h"
-#include "Cruzer-S/event-handler/event-object.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -14,45 +14,9 @@
 #include <sys/fcntl.h>
 #include <linux/limits.h>
 
-#include <openssl/ssl.h>
+extern int session_write(SessionPrivate session, void *buffer, int size);
 
-struct web_server {
-	EventHandler handler;
-
-	WebServerHandler callback;
-
-	WebServerConfig config;
-
-	EventObject object;
-
-	SSL_CTX *ctx;
-};
-
-enum session_process {
-	SESSION_PROCESS_READ_HEADER,
-	SESSION_PROCESS_PARSE_HEADER,
-	SESSION_PROCESS_READ_BODY,
-	SESSION_PROCESS_DONE,
-	SESSION_PROCESS_REARMING
-};
-
-typedef struct _session {
-	struct session _;
-
-	WebServer server;
-
-	size_t readlen;
-
-	EventObject object;
-
-	SSL *ssl;
-
-	enum session_process progress;
-} *_Session;
-
-extern int session_write(_Session session, void *buffer, int size);
-
-int session_send_file(_Session session, char *filename)
+int session_send_file(SessionPrivate session, char *filename)
 {
 	int rfd = open(filename, O_RDWR);
 	int total_len = 0;
@@ -103,9 +67,7 @@ static int strtlen(int n, ...)
 
 int ws_send_file(Session _, char *filename)
 {
-	_Session session = (_Session) (
-		(void *) _ - (void *) offsetof(struct _session, _)
-	);
+	SessionPrivate session = (SessionPrivate) _;
 
 	char filepath[PATH_MAX];
 	size_t fsize; char fsize_str[32];
