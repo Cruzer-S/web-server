@@ -1,9 +1,8 @@
-#ifndef WEB_SERVER_PRIVATE_H__
-#define WEB_SERVER_PRIVATE_H__
+#ifndef SESSION_H__
+#define SESSION_H__
 
 #include "web_server.h"
 
-#include "Cruzer-S/event-handler/event-handler.h"
 #include "Cruzer-S/event-handler/event-object.h"
 
 #include <openssl/ssl.h>
@@ -14,18 +13,6 @@ enum session_process {
 	SESSION_PROCESS_READ_BODY,
 	SESSION_PROCESS_DONE,
 	SESSION_PROCESS_REARMING
-};
-
-struct web_server {
-	EventHandler handler;
-
-	WebServerHandler callback;
-
-	WebServerConfig config;
-
-	EventObject object;
-
-	SSL_CTX *ctx;
 };
 
 typedef struct session_private {
@@ -41,5 +28,11 @@ typedef struct session_private {
 
 	enum session_process progress;
 } *SessionPrivate;
+
+SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback);
+void session_destroy(SessionPrivate session);
+
+int session_write(SessionPrivate session, char *buffer, int size);
+int session_read(SessionPrivate session, char *buffer, int size);
 
 #endif
