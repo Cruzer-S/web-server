@@ -23,8 +23,6 @@
 	.bodylen = (S)->bodylen						\
 } )
 
-#define OVER_ZERO(X) (((X) < 0) ? 0 : (X))
-
 enum session_process {
 	SESSION_PROCESS_READ_HEADER,
 	SESSION_PROCESS_PARSE_HEADER,
@@ -183,8 +181,11 @@ static int read_header(_Session session)
 		session->_.headerlen += len;
 		session->_.header.buffer[session->_.headerlen] = '\0';
 
-		int hlen = session->_.headerlen;
-		if (strstr(&buffer[OVER_ZERO(hlen - 4)], "\r\n\r\n"))
+		int hlen = session->_.headerlen - 4;
+		if (hlen < 0)
+			hlen = 0;
+
+		if (strstr(&buffer[hlen], "\r\n\r\n"))
 			return hlen;
 
 		if (hlen == HTTP_HEADER_MAX_SIZE)
