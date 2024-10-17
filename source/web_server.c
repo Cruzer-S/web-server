@@ -299,6 +299,9 @@ WebServer web_server_create(WebServerConfig config)
 		server->ctx = NULL;
 	}
 
+	if (config->hostname == NULL)
+		config->hostname = get_hostname(AF_INET);
+
 	int fd = make_listener(config->hostname, config->service, 15, true);
 	if (fd == -1)
 		goto FREE_SSL;
