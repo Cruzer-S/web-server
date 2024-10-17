@@ -31,8 +31,6 @@ struct web_server {
 	SSL_CTX *ctx;
 };
 
-static void handle_client(EventObject object);
-
 static int read_header(SessionPrivate session)
 {
 	char *buffer = session->header.buffer;
