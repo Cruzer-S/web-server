@@ -286,7 +286,11 @@ WebServer web_server_create(WebServerConfig config)
 	if (server == NULL)
 		goto RETURN_NULL;
 
-	server->config = config;
+	if (config == NULL)
+		server->config = &(struct web_server_config)
+				  WEB_SERVER_DEFAULT_CONFIG;
+	else
+		server->config = config;
 
 	if (server->config->use_ssl) {
  		if (web_server_init_ssl(server) == -1)

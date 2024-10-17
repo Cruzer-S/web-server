@@ -6,6 +6,16 @@
 #include <stddef.h> // size_t
 #include <stdbool.h>
 
+#define WEB_SERVER_DEFAULT_CONFIG {			\
+	.hostname = NULL,				\
+	.service = "80",				\
+							\
+	.server_name = "mythos engine",			\
+	.basedir = ".",					\
+							\
+	.use_ssl = false				\
+}
+
 typedef struct web_server_config {
 	char *hostname;
 	char *service;
