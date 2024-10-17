@@ -13,6 +13,8 @@ SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback)
 	if (session == NULL)
 		goto RETURN_NULL;
 
+	session->id = fd;
+
 	session->server = NULL;
 	session->body = NULL;
 	session->headerlen = session->bodylen = 0;
@@ -56,7 +58,7 @@ void session_destroy(SessionPrivate session)
 	free(session);
 }
 
-int session_write(SessionPrivate session, char *buffer, int size)
+int session_write(SessionPrivate session, void *buffer, int size)
 {
 	ssize_t len;
 
@@ -76,7 +78,7 @@ int session_write(SessionPrivate session, char *buffer, int size)
 	return len;
 }
 
-int session_read(SessionPrivate session, char *buffer, int size)
+int session_read(SessionPrivate session, void *buffer, int size)
 {
 	ssize_t len;
 

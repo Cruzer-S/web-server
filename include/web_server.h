@@ -42,7 +42,10 @@ void web_server_destroy(WebServer server);
 int web_server_start(WebServer server);
 void web_server_stop(WebServer server);
 
-void web_server_register_handler(WebServer server, WebServerHandler handler);
+void web_server_register_handler(
+		WebServer server,
+		WebServerHandler open, WebServerHandler close
+);
 
 WebServerConfig web_server_get_config(WebServer );
 

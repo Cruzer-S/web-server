@@ -71,6 +71,11 @@ static void request_handler(Session session)
 	}
 }
 
+static void close_handler(Session session)
+{
+	info("client close (ID: %d)", session->id);
+}
+
 int main(int argc, char *argv[])
 {
 	char *hostname;
@@ -101,7 +106,7 @@ int main(int argc, char *argv[])
 	if (server == NULL)
 		crtc("failed to web_server_create()");
 
-	web_server_register_handler(server, request_handler);
+	web_server_register_handler(server, request_handler, close_handler);
 
 	if (web_server_start(server) == -1)
 		crtc("failed to web_server_start()");

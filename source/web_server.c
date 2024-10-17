@@ -21,7 +21,8 @@
 struct web_server {
 	EventHandler handler;
 
-	WebServerHandler callback;
+	WebServerHandler open_callback;
+	WebServerHandler close_callback;
 
 	WebServerConfig config;
 
@@ -173,10 +174,10 @@ static void handle_client(EventObject object)
 		session->progress++;
 
 	SESSION_PROCESS_DONE: case SESSION_PROCESS_DONE:
-		if (session->server->callback == NULL)
+		if (session->server->open_callback == NULL)
 			goto FREE_BODY;
 
-		session->server->callback((Session) session);
+		session->server->open_callback((Session) session);
 
 		session->progress++;
 
@@ -197,6 +198,8 @@ static void handle_client(EventObject object)
 FREE_BODY:	free(session->body); session->body = NULL;
 DELETE_EVENT:	event_handler_del(session->server->handler, session->object);
 CLOSE_FD:	close(event_object_get_fd(session->object));
+CLOSE_CALLBACK:	if (session->server->close_callback)
+			session->server->close_callback((Session) session);
 DESTROY_SESSION:session_destroy(session);
 }
 
@@ -308,9 +311,9 @@ WebServer web_server_create(WebServerConfig config)
 	if (server->object == NULL)
 		goto DESTROY_HANDLER;
 
-	server->callback = NULL;
+	server->open_callback = NULL;
+	server->close_callback = NULL;
 
-	
 	return server;
 
 DESTROY_HANDLER:event_handler_destroy(server->handler);
@@ -349,9 +352,12 @@ int web_server_start(WebServer server)
 	return 0;
 }
 
-void web_server_register_handler(WebServer server, WebServerHandler handler)
-{
-	server->callback = handler;
+void web_server_register_handler(
+		WebServer server,
+		WebServerHandler open, WebServerHandler close
+) {
+	server->open_callback = open;
+	server->close_callback = close;
 }
 
 void web_server_stop(WebServer server)

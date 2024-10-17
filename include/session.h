@@ -32,7 +32,7 @@ typedef struct session_private {
 SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback);
 void session_destroy(SessionPrivate session);
 
-int session_write(SessionPrivate session, char *buffer, int size);
-int session_read(SessionPrivate session, char *buffer, int size);
+int session_write(SessionPrivate session, void *buffer, int size);
+int session_read(SessionPrivate session, void *buffer, int size);
 
 #endif

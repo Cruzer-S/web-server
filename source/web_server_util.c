@@ -1,6 +1,7 @@
 #include "web_server_util.h"
 
-#include "web_server_private.h"
+#include "web_server.h"
+#include "session.h"
 
 #include "Cruzer-S/http/http.h"
 #include "Cruzer-S/linux-lib/file.h"
@@ -13,8 +14,6 @@
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <linux/limits.h>
-
-extern int session_write(SessionPrivate session, void *buffer, int size);
 
 int session_send_file(SessionPrivate session, char *filename)
 {
@@ -72,7 +71,7 @@ int ws_send_file(Session _, char *filename)
 	char filepath[PATH_MAX];
 	size_t fsize; char fsize_str[32];
 	struct http_response_header *header;
-	WebServerConfig config = session->server->config;
+	WebServerConfig config = web_server_get_config(session->server);
 
 	if (strtlen(3, config->basedir, "/", filename) >= PATH_MAX)
 		return -1;
