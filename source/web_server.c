@@ -25,9 +25,6 @@
 
 #define OVER_ZERO(X) (((X) < 0) ? 0 : (X))
 
-#define msg(...) log(logger, INFO, __VA_ARGS__)
-#define err(...) log(logger, ERRN, __VA_ARGS__)
-
 enum session_process {
 	SESSION_PROCESS_READ_HEADER,
 	SESSION_PROCESS_PARSE_HEADER,
