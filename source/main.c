@@ -52,17 +52,20 @@ static void request_handler(Session session)
 	size_t bodylen = session->bodylen;
 	char *file;
 
+	info("client %d request (%s): %s",
+      	      session->id, header->method, header->url);
+
 	switch (http_get_method(header))
 	{
 	case HTTP_REQUEST_GET:
-		info("client request(%s): %s (ID: %d)",
-      		     "GET", header->url, session->id);
 		if ( !strcmp(header->url, "/") )
 			file = "index.html";
 		else
 			file = header->url + 1;
 
-		ws_send_file(session, file);
+		if (ws_send_file(session, file) == -1)
+			warn("failed to send file: %s (ID: %d)", 
+			      file, session->id);
 
 		break;
 
@@ -73,7 +76,7 @@ static void request_handler(Session session)
 
 static void close_handler(Session session)
 {
-	info("client close (ID: %d)", session->id);
+	info("client %d closed", session->id);
 }
 
 int main(int argc, char *argv[])
