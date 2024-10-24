@@ -341,7 +341,6 @@ void web_server_destroy(WebServer server)
 	int fd = event_object_get_fd(server->object);
 	close(fd);
 
-	event_handler_del(server->handler, server->object);
 	event_object_destroy(server->object);
 	event_handler_destroy(server->handler);
 
@@ -373,6 +372,7 @@ void web_server_register_handler(
 
 void web_server_stop(WebServer server)
 {
+	event_handler_del(server->handler, server->object);
 	event_handler_stop(server->handler);
 
 	server->is_running = false;
