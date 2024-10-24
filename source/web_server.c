@@ -110,9 +110,14 @@ static int read_body(SessionPrivate session)
 	return -1; // never reach
 }
 
-int session_rearm(SessionPrivate session)
+static int session_rearm(SessionPrivate session)
 {
-	free(session->body); session->body = NULL;
+	http_free_field_list(session->header.field_head);
+	session->header.field_head = NULL;
+
+	free(session->body);
+	session->body = NULL;
+
 	session->readlen = session->bodylen = 0;
 	session->headerlen = 0;
 
@@ -127,10 +132,31 @@ static int parse_header(SessionPrivate session)
 		return -1;
 
 	session->bodylen = parse_body_len(&session->header);
-	if (session->bodylen == -1)
+	if (session->bodylen == -1) {
+		http_free_field_list(session->header.field_head);
 		return -1;
+	}
 	
 	return session->bodylen;
+}
+
+static void session_cleanup(SessionPrivate session)
+{
+	if (session->body) {
+		free(session->body);
+		session->body = NULL;
+	}
+
+	if (session->header.field_head) {
+		http_free_field_list(session->header.field_head);
+		session->header.field_head = NULL;
+	}
+
+	event_handler_del(session->server->handler, session->object);
+	close(event_object_get_fd(session->object));
+	if (session->server->close_callback)
+		session->server->close_callback((Session) session);
+	session_destroy(session);
 }
 
 static void handle_client(EventObject object)
@@ -141,20 +167,20 @@ static void handle_client(EventObject object)
 	switch(session->progress) {
 	case SESSION_PROCESS_READ_HEADER:
 		retval = read_header(session);
-		if (retval == -1)	goto DELETE_EVENT;
+		if (retval == -1)	goto SESSION_CLEANUP;
 		if (retval == 0)	break;
 
 		session->progress++;
 
 	case SESSION_PROCESS_PARSE_HEADER:
 		if (parse_header(session) == -1)
-			goto DELETE_EVENT;
+			goto SESSION_CLEANUP;
 
 		if (session->bodylen > 0) {
 			session->body = malloc(session->bodylen);
 
 			if (session->body == NULL)
-				goto DELETE_EVENT;
+				goto SESSION_CLEANUP;
 		} else {
 			session->progress++;
 		}
@@ -166,7 +192,7 @@ static void handle_client(EventObject object)
 	case SESSION_PROCESS_READ_BODY:
 		retval = read_body(session);
 		if (retval == -1)
-			goto FREE_BODY;
+			goto SESSION_CLEANUP;
 
 		if (retval == 0)
 			break;
@@ -175,7 +201,7 @@ static void handle_client(EventObject object)
 
 	SESSION_PROCESS_DONE: case SESSION_PROCESS_DONE:
 		if (session->server->open_callback == NULL)
-			goto FREE_BODY;
+			goto SESSION_CLEANUP;
 
 		session->server->open_callback((Session) session);
 
@@ -187,7 +213,7 @@ static void handle_client(EventObject object)
 		);
 
 		if ( !field || (field && strcmp(field->value, "keep-alive")) )
-			goto FREE_BODY;
+			goto SESSION_CLEANUP;
 
 		session_rearm(session);
 	}	break;
@@ -195,12 +221,7 @@ static void handle_client(EventObject object)
 
 	return ;
 
-FREE_BODY:	free(session->body); session->body = NULL;
-DELETE_EVENT:	event_handler_del(session->server->handler, session->object);
-CLOSE_FD:	close(event_object_get_fd(session->object));
-CLOSE_CALLBACK:	if (session->server->close_callback)
-			session->server->close_callback((Session) session);
-DESTROY_SESSION:session_destroy(session);
+SESSION_CLEANUP: session_cleanup(session);
 }
 
 static void accept_client(EventObject arg)

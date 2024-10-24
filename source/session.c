@@ -17,6 +17,7 @@ SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback)
 
 	session->server = NULL;
 	session->body = NULL;
+	session->header.field_head = NULL;
 	session->headerlen = session->bodylen = 0;
 	session->progress = SESSION_PROCESS_READ_HEADER;
 
