@@ -62,13 +62,39 @@ static void close_handler(Session session)
 	info("client %d closed", session->id);
 }
 
-int main(int argc, char *argv[])
+static bool init_config(WebServerConfig config, int argc, char **argv)
 {
 	char *hostname;
-	char *service = "443";
 
+	if (argc != 6)
+		return false;
+
+	if ( !strcmp(argv[1], "null") || !strcmp(argv[1], "NULL") ) {
+		hostname = get_hostname(AF_INET);
+
+		if (hostname == NULL)
+			return false;
+	} else {
+		hostname = argv[1];
+	}
+
+	config->hostname = hostname;
+	config->service = argv[2];
+	config->basedir = argv[3];
+	config->cert_key = argv[4];
+	config->priv_key = argv[5];
+
+	config->use_ssl = true;
+
+	config->server_name = "mythos web server";
+
+	return true;
+}
+
+int main(int argc, char *argv[])
+{
+	struct web_server_config config;
 	WebServer server;
-	WebServerConfig config;
 
 	if ( !logger_initialize() )
 		perror("failed to logger_initialize(): ");
@@ -76,22 +102,10 @@ int main(int argc, char *argv[])
 	if (signal(SIGUSR1, signal_handler) == SIG_ERR)
 		crtc("failed to signal()");
 
-	hostname = get_hostname(AF_INET);
-	if (hostname == NULL)
-		crtc("failed to get_hostname()");
+	if ( !init_config(&config, argc, argv) )
+		crtc("failed to init_config()");
 	
-	config = &(struct web_server_config) {
-		.hostname = hostname,
-		.service = service,
-
-		.server_name = "mythos web server",
-		.basedir = "resources",
-		.use_ssl = true,
-		.cert_key = "certs/fullchain.pem",
-		.priv_key = "certs/privkey.pem"
-	};
-
-	server = web_server_create(config);
+	server = web_server_create(&config);
 	if (server == NULL)
 		crtc("failed to web_server_create()");
 
@@ -100,17 +114,17 @@ int main(int argc, char *argv[])
 	if (web_server_start(server) == -1)
 		crtc("failed to web_server_start()");
 
-	info("server running at %s:%s", hostname, service);
+	info("server running at %s:%s", config.hostname, config.service);
 
 	for (run_server = true; run_server; )
 		sleep(1);
 
-	info("stop server", hostname, service);
+	info("stop server");
 
 	web_server_stop(server);
 	web_server_destroy(server);
 
-	info("cleanup done.", hostname, service);
+	info("cleanup done.");
 
 	logger_destroy();
 
