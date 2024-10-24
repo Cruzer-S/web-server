@@ -28,6 +28,8 @@ struct web_server {
 
 	EventObject object;
 
+	bool is_running;
+
 	SSL_CTX *ctx;
 };
 
@@ -319,6 +321,8 @@ WebServer web_server_create(WebServerConfig config)
 	server->open_callback = NULL;
 	server->close_callback = NULL;
 
+	server->is_running = false;
+
 	return server;
 
 DESTROY_HANDLER:event_handler_destroy(server->handler);
@@ -354,6 +358,8 @@ int web_server_start(WebServer server)
 		return -1;
 	}
 
+	server->is_running = true;
+
 	return 0;
 }
 
@@ -368,6 +374,8 @@ void web_server_register_handler(
 void web_server_stop(WebServer server)
 {
 	event_handler_stop(server->handler);
+
+	server->is_running = false;
 }
 
 WebServerConfig web_server_get_config(WebServer server)
