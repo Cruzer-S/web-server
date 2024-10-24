@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 #include <netdb.h>
 #include <net/if.h>
@@ -17,6 +18,13 @@
 #define info(...) log(INFO, __VA_ARGS__)
 #define crtc(...) log(PCRTC, __VA_ARGS__), exit(EXIT_FAILURE)
 #define warn(...) log(WARN, __VA_ARGS__)
+
+static bool run_server = false;
+
+void signal_handler(int signo)
+{
+	run_server = false;
+}
 
 static void request_handler(Session session)
 {
@@ -63,6 +71,9 @@ int main(int argc, char *argv[])
 	if ( !logger_initialize() )
 		perror("failed to logger_initialize(): ");
 
+	if (signal(SIGUSR1, signal_handler) == SIG_ERR)
+		crtc("failed to signal()");
+
 	hostname = get_hostname(AF_INET);
 	if (hostname == NULL)
 		crtc("failed to get_hostname()");
@@ -89,11 +100,17 @@ int main(int argc, char *argv[])
 
 	info("server running at %s:%s", hostname, service);
 
-	while (true)
+	for (run_server = true; run_server; )
 		sleep(1);
+
+	info("stop server", hostname, service);
 
 	web_server_stop(server);
 	web_server_destroy(server);
+
+	info("cleanup done.", hostname, service);
+
+	logger_destroy();
 
 	return 0;
 }
