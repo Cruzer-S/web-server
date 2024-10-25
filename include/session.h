@@ -18,6 +18,8 @@ enum session_process {
 typedef struct session_private {
 	struct SESSION_MEMBER;
 
+	enum web_server_error error;
+
 	WebServer server;
 
 	size_t readlen;
@@ -34,5 +36,7 @@ void session_destroy(SessionPrivate session);
 
 int session_write(SessionPrivate session, void *buffer, int size);
 int session_read(SessionPrivate session, void *buffer, int size);
+
+enum web_server_error session_get_error(SessionPrivate );
 
 #endif

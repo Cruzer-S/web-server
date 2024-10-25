@@ -113,3 +113,8 @@ int session_read(SessionPrivate session, void *buffer, int size)
 
 	return len;
 }
+
+enum web_server_error session_get_error(SessionPrivate session)
+{
+	return session->error;
+}
