@@ -2,7 +2,6 @@
 
 #include "session.h"
 
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -31,6 +30,19 @@ struct web_server {
 	bool is_running;
 
 	SSL_CTX *ctx;
+};
+
+enum http_status_code error_to_code[] = {
+	[WS_ERROR_NONE] = HTTP_STATUS_CODE_OK,
+
+	[WS_ERROR_BAD_REQUEST] = HTTP_STATUS_CODE_BAD_REQUEST,
+	[WS_ERROR_TOO_LONG_URI] = HTTP_STATUS_CODE_URI_TOO_LONG,
+
+	[WS_ERROR_NOT_FOUND] = HTTP_STATUS_CODE_NOT_FOUND,
+
+	[WS_ERROR_INTERNAL] = HTTP_STATUS_CODE_INTERNAL,
+
+	[WS_ERROR_CLOSED] = HTTP_STATUS_CODE_UNKNOWN,
 };
 
 static int read_header(SessionPrivate session)
@@ -157,7 +169,6 @@ static void session_cleanup(SessionPrivate session)
 
 	event_handler_del(session->server->handler, session->object);
 	close(event_object_get_fd(session->object));
-	event_object_destroy(session->object);
 
 	session_destroy(session);
 }
@@ -263,9 +274,6 @@ static void accept_client(EventObject arg)
 			if (ret == SSL_ERROR_WANT_READ 
 			 || ret == SSL_ERROR_WANT_WRITE)
 				continue;
-
-			char buffer[256];
-			printf("%s\n", ERR_error_string(ret, buffer));
 
 			goto DESTROY_SESSION;
 		}
@@ -411,4 +419,9 @@ void web_server_stop(WebServer server)
 WebServerConfig web_server_get_config(WebServer server)
 {
 	return server->config;
+}
+
+enum http_status_code web_server_error_code(enum web_server_error error)
+{
+	return error_to_code[error];
 }
