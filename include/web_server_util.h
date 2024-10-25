@@ -5,4 +5,6 @@
 
 int ws_send_file(Session session, char *filename);
 
+enum web_server_error ws_get_session_error(Session session);
+
 #endif
