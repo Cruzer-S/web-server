@@ -142,6 +142,9 @@ static int parse_header(SessionPrivate session)
 
 static void session_cleanup(SessionPrivate session)
 {
+	if (session->server->close_callback)
+		session->server->close_callback((Session) session);
+
 	if (session->body) {
 		free(session->body);
 		session->body = NULL;
@@ -154,8 +157,8 @@ static void session_cleanup(SessionPrivate session)
 
 	event_handler_del(session->server->handler, session->object);
 	close(event_object_get_fd(session->object));
-	if (session->server->close_callback)
-		session->server->close_callback((Session) session);
+	event_object_destroy(session->object);
+
 	session_destroy(session);
 }
 
@@ -163,6 +166,9 @@ static void handle_client(EventObject object)
 {
 	SessionPrivate session = event_object_get_arg(object);
 	int retval;
+
+	if ( !session->server->is_running ) 
+		goto SESSION_CLEANUP;
 
 	switch(session->progress) {
 	case SESSION_PROCESS_READ_HEADER:
@@ -230,6 +236,9 @@ static void accept_client(EventObject arg)
 	EventHandler handler = server->handler;
 
 	int listen_fd = event_object_get_fd(server->object);
+
+	if ( !server->is_running )
+		return ;
 
 	int clnt_fd = accept(listen_fd, NULL, NULL);
 	if (clnt_fd == -1)
@@ -370,6 +379,8 @@ void web_server_destroy(WebServer server)
 
 int web_server_start(WebServer server)
 {
+	server->is_running = true;
+
 	if (event_handler_start(server->handler) == -1)
 		return -1;
 
@@ -377,8 +388,6 @@ int web_server_start(WebServer server)
 		event_handler_stop(server->handler);
 		return -1;
 	}
-
-	server->is_running = true;
 
 	return 0;
 }
@@ -393,10 +402,10 @@ void web_server_register_handler(
 
 void web_server_stop(WebServer server)
 {
+	server->is_running = false;
+
 	event_handler_del(server->handler, server->object);
 	event_handler_stop(server->handler);
-
-	server->is_running = false;
 }
 
 WebServerConfig web_server_get_config(WebServer server)
