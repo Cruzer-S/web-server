@@ -115,7 +115,10 @@ int ws_render(Session _, enum http_status_code code, const char *filename)
 		writelen += retval;
 	}
 
-	session_send_file(session, filepath);
+	if (session_send_file(session, filepath) == -1) {
+		free(header);
+		SESSION_ERR(session, WS_ERROR_CLOSED);
+	}
 
 	free(header);
 
