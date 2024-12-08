@@ -3,7 +3,6 @@
 #include "web_server.h"
 #include "session.h"
 
-#include "Cruzer-S/http/http.h"
 #include "Cruzer-S/linux-lib/file.h"
 
 #include <stdio.h>
@@ -68,6 +67,12 @@ static int strtlen(int n, ...)
 
 // `ws_render` only accept HTML file.
 // Therefore, `Content-Type` is fixed to `text/html; charset=utf-8`
+int ws_render_template(Session _, enum http_status_code code,
+		       const char *filename, struct cjson_object *json)
+{
+	return 0;
+}
+
 int ws_render(Session _, enum http_status_code code, const char *filename)
 {
 	SessionPrivate session = (SessionPrivate) _;
