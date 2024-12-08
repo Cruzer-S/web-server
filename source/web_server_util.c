@@ -66,7 +66,9 @@ static int strtlen(int n, ...)
 	return size;
 }
 
-int ws_send_file(Session _, char *filename)
+// `ws_render` only accept HTML file.
+// Therefore, `Content-Type` is fixed to `text/html; charset=utf-8`
+int ws_render(Session _, enum http_status_code code, const char *filename)
 {
 	SessionPrivate session = (SessionPrivate) _;
 
@@ -92,7 +94,7 @@ int ws_send_file(Session _, char *filename)
 	sprintf(fsize_str, "%zu", fsize);
 
 	header = http_make_response_header(
-		HTTP_VERSION_1_1, 200, 4,
+		HTTP_VERSION_1_1, code, 3,
 		"Server", config->server_name,
 		"Content-Length", fsize_str,
 		"Content-Type", "text/html; charset=utf-8"
