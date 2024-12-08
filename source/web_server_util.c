@@ -93,7 +93,6 @@ int ws_send_file(Session _, char *filename)
 
 	header = http_make_response_header(
 		HTTP_VERSION_1_1, 200, 4,
-		"Connection", "Keep-Alive",
 		"Server", config->server_name,
 		"Content-Length", fsize_str,
 		"Content-Type", "text/html; charset=utf-8"
