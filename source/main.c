@@ -46,10 +46,6 @@ static void request_handler(Session session)
 		else
 			file = header->url + 1;
 
-		if (ws_send_file(session, file) == -1)
-			warn("failed to send file: %s (ID: %d)", 
-			      file, session->id);
-
 		break;
 
 	default:

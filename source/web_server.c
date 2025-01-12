@@ -13,7 +13,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#include "Cruzer-S/event-handler/event-handler.h"
+#include "Cruzer-S/event-handler/event_handler.h"
 #include "Cruzer-S/net-util/net-util.h"
 #include "Cruzer-S/http/http.h"
 
@@ -24,8 +24,6 @@ struct web_server {
 	WebServerHandler close_callback;
 
 	WebServerConfig config;
-
-	EventObject object;
 
 	bool is_running;
 
@@ -97,7 +95,7 @@ static long int parse_body_len(struct http_request_header *header)
 static int read_body(SessionPrivate session)
 {
 	char *buffer = session->body;
-	int fd = event_object_get_fd(session->object);
+	int fd;
 
 	while (true) {
 		ssize_t readlen = recv(
@@ -167,15 +165,15 @@ static void session_cleanup(SessionPrivate session)
 		session->header.field_head = NULL;
 	}
 
-	event_handler_del(session->server->handler, session->object);
-	close(event_object_get_fd(session->object));
+	event_handler_del(session->server->handler, 0);
+	// close(event_object_get_fd(session->object));
 
 	session_destroy(session);
 }
 
-static void handle_client(EventObject object)
+static void handle_client(int fd, void* arg)
 {
-	SessionPrivate session = event_object_get_arg(object);
+	SessionPrivate session;
 	int retval;
 
 	if ( !session->server->is_running ) 
@@ -241,12 +239,12 @@ static void handle_client(EventObject object)
 SESSION_CLEANUP: session_cleanup(session);
 }
 
-static void accept_client(EventObject arg)
+static void accept_client(void *arg)
 {
-	WebServer server = event_object_get_arg(arg);
+	WebServer server = NULL;
 	EventHandler handler = server->handler;
 
-	int listen_fd = event_object_get_fd(server->object);
+	int listen_fd = 0;
 
 	if ( !server->is_running )
 		return ;
@@ -280,7 +278,8 @@ static void accept_client(EventObject arg)
 	}
 
 	session->server = server;
-	if (event_handler_add(server->handler, session->object) == -1)
+	if (event_handler_add(server->handler, clnt_fd,
+		       	      handle_client, server->handler) == -1)
 		goto DESTROY_SESSION;
 
 	return ;
@@ -350,12 +349,6 @@ WebServer web_server_create(WebServerConfig config)
 	if (server->handler == NULL)
 		goto CLOSE_FD;
 
-	server->object = event_object_create(
-		fd, true, server, accept_client
-	);
-	if (server->object == NULL)
-		goto DESTROY_HANDLER;
-
 	server->open_callback = NULL;
 	server->close_callback = NULL;
 
@@ -376,10 +369,9 @@ void web_server_destroy(WebServer server)
 	if (server->ctx)
 		SSL_CTX_free(server->ctx);
 
-	int fd = event_object_get_fd(server->object);
+	int fd;
 	close(fd);
 
-	event_object_destroy(server->object);
 	event_handler_destroy(server->handler);
 
 	free(server);
@@ -392,7 +384,7 @@ int web_server_start(WebServer server)
 	if (event_handler_start(server->handler) == -1)
 		return -1;
 
-	if (event_handler_add(server->handler, server->object) == -1) {
+	if (event_handler_add(server->handler, 0, NULL, NULL) == -1) {
 		event_handler_stop(server->handler);
 		return -1;
 	}
@@ -412,7 +404,7 @@ void web_server_stop(WebServer server)
 {
 	server->is_running = false;
 
-	event_handler_del(server->handler, server->object);
+	event_handler_del(server->handler, 0);
 	event_handler_stop(server->handler);
 }
 

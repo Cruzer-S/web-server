@@ -21,16 +21,10 @@ SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback)
 	session->headerlen = session->bodylen = 0;
 	session->progress = SESSION_PROCESS_READ_HEADER;
 
-	session->object = event_object_create(
-		fd, true, session, callback
-	);
-	if (session->object == NULL)
-		goto FREE_SESSION;
-
 	if (ctx) {
 		session->ssl = SSL_new(ctx);
 		if (session->ssl == NULL)
-			goto DESTROY_OBJECT;
+			goto FREE_SESSION;
 
 		if (SSL_set_fd(session->ssl, fd) != 1)
 			goto FREE_SSL;
@@ -42,13 +36,13 @@ SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback)
 	return session;
 
 FREE_SSL:	SSL_free(session->ssl);
-DESTROY_OBJECT:	event_object_destroy(session->object);
 FREE_SESSION:	free(session);
 RETURN_NULL:	return NULL;
 }
 
 void session_destroy(SessionPrivate session)
 {
+	/*
 	int fd = event_object_get_fd(session->object);
 
 	if (session->ssl)
@@ -56,6 +50,7 @@ void session_destroy(SessionPrivate session)
 
 	event_object_destroy(session->object);
 
+	*/
 	free(session);
 }
 
@@ -69,7 +64,7 @@ int session_write(SessionPrivate session, void *buffer, int size)
 		if (len <= 0)
 			return -1;
 	} else {
-		int fd = event_object_get_fd(session->object);
+		int fd /* = event_object_get_fd(session->object)*/;
 
 		len = write(fd, buffer, size);
 		if (len == -1)
@@ -97,7 +92,7 @@ int session_read(SessionPrivate session, void *buffer, int size)
 			return -2;
 		}
 	} else {
-		int fd = event_object_get_fd(session->object);
+		int fd/* = event_object_get_fd(session->object)*/;
 
 		len = recv(fd, buffer, size, 0);
 		if (len == -1) {

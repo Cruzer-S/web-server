@@ -3,7 +3,7 @@
 
 #include "web_server.h"
 
-#include "Cruzer-S/event-handler/event-object.h"
+#include "Cruzer-S/event-handler/event_handler.h"
 
 #include <openssl/ssl.h>
 
@@ -23,8 +23,6 @@ typedef struct session_private {
 	WebServer server;
 
 	size_t readlen;
-
-	EventObject object;
 
 	SSL *ssl;
 
