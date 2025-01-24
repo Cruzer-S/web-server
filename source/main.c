@@ -44,7 +44,7 @@ static void request_handler(Session session)
 	{
 	case HTTP_REQUEST_GET:
 		if ( !strcmp(header->url, "/") )
-			file = "resources/index.html";
+			file = "index.html";
 		else if ( !strcmp(header->url, "/favicon.ico") )
 			file = "favicon.png";
 		else
