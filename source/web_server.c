@@ -1,10 +1,7 @@
 #include "web_server.h"
 
-#include "session.h"
-
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
 
 #include <unistd.h>
 
@@ -15,12 +12,31 @@
 
 #include "Cruzer-S/event-handler/event_handler.h"
 #include "Cruzer-S/net-util/net-util.h"
-#include "Cruzer-S/http/http.h"
+
+#include "web_client.h"
+
+const WebServerConfig web_server_default_config = &(struct web_server_config) {
+	.hostname = NULL,
+	.service = "80",
+
+	.server_name = "mythos engine",
+	.basedir = ".",
+
+	.use_ssl = false,
+
+	.nthread = 4
+};
 
 struct web_server {
-	EventHandler handler;
+	int listener_fd;
+	Event listener;
+
+	EventHandler *handlers;
+	int n_handler;
+	int next_handler;
 
 	WebServerHandler open_callback;
+	WebServerHandler request_callback;
 	WebServerHandler close_callback;
 
 	WebServerConfig config;
@@ -30,261 +46,72 @@ struct web_server {
 	SSL_CTX *ctx;
 };
 
-enum http_status_code error_to_code[] = {
-	[WS_ERROR_NONE] = HTTP_STATUS_CODE_OK,
-
-	[WS_ERROR_BAD_REQUEST] = HTTP_STATUS_CODE_BAD_REQUEST,
-	[WS_ERROR_TOO_LONG_URI] = HTTP_STATUS_CODE_URI_TOO_LONG,
-
-	[WS_ERROR_NOT_FOUND] = HTTP_STATUS_CODE_NOT_FOUND,
-
-	[WS_ERROR_INTERNAL] = HTTP_STATUS_CODE_INTERNAL,
-
-	[WS_ERROR_CLOSED] = HTTP_STATUS_CODE_UNKNOWN,
-};
-
-static int read_header(SessionPrivate session)
+static void handle_client(int _, void* arg)
 {
-	char *buffer = session->header.buffer;
-	int len;
+	WebClient client = arg;
+	WebServer server = client->server;
 
-	while (true) {
-		len = session_read(session, buffer + session->headerlen, 1);
-		if (len == -1)
-			return 0;
-		if (len == -2)
-			return -1;
+	int retval = web_client_get_request(arg);
 
-		session->headerlen += len;
-		session->header.buffer[session->headerlen] = '\0';
+	switch (retval) {
+	case -1:
+		if (server->close_callback)
+			server->close_callback(client->session);
 
-		int hlen = session->headerlen - 4;
-		if (hlen < 0)
-			hlen = 0;
+		event_handler_del(client->handler, client->event);
+		close(client->session->fd);
+		web_client_destroy(client);
+		break;
 
-		if (strstr(&buffer[hlen], "\r\n\r\n"))
-			return hlen;
+	case 0:
+		/* do nothing */ ;
+		break;
 
-		if (hlen == HTTP_HEADER_MAX_SIZE)
-			return -1;
-	}
-
-	return -1; // never reach
-}
-
-static long int parse_body_len(struct http_request_header *header)
-{
-	struct http_header_field *field;
-	long bodylen;
-	char *endptr;
-
-	field = http_find_field(header, "Content-Length: ");
-	if (field == NULL)
-		return 0;
-
-	errno = 0; bodylen = strtol(field->value, &endptr, 10);
-	if (field->value == endptr || errno == ERANGE)
-		return -1;
-
-	if (bodylen <= 0)
-		return -1;
-
-	return bodylen;
-}
-
-static int read_body(SessionPrivate session)
-{
-	char *buffer = session->body;
-	int fd;
-
-	while (true) {
-		ssize_t readlen = recv(
-			fd, &buffer[session->readlen],
-			session->bodylen - session->readlen, 0
-		);
-		if (readlen == -1) {
-			if (errno == EAGAIN)
-				return 0;
-
-			return -1;
-		}
-
-		if (readlen == 0)
-			return -1;
-
-		session->readlen += readlen;
-		if (session->readlen == session->bodylen)
-			return session->readlen;
-	}
-
-	return -1; // never reach
-}
-
-static int session_rearm(SessionPrivate session)
-{
-	http_free_field_list(session->header.field_head);
-	session->header.field_head = NULL;
-
-	free(session->body);
-	session->body = NULL;
-
-	session->readlen = session->bodylen = 0;
-	session->headerlen = 0;
-
-	session->progress = SESSION_PROCESS_READ_HEADER;
-
-	return 0;
-}
-
-static int parse_header(SessionPrivate session)
-{
-	if (http_request_header_parse(&session->header) == -1)
-		return -1;
-
-	session->bodylen = parse_body_len(&session->header);
-	if (session->bodylen == -1) {
-		http_free_field_list(session->header.field_head);
-		return -1;
-	}
-	
-	return session->bodylen;
-}
-
-static void session_cleanup(SessionPrivate session)
-{
-	if (session->server->close_callback)
-		session->server->close_callback((Session) session);
-
-	if (session->body) {
-		free(session->body);
-		session->body = NULL;
-	}
-
-	if (session->header.field_head) {
-		http_free_field_list(session->header.field_head);
-		session->header.field_head = NULL;
-	}
-
-	event_handler_del(session->server->handler, 0);
-	// close(event_object_get_fd(session->object));
-
-	session_destroy(session);
-}
-
-static void handle_client(int fd, void* arg)
-{
-	SessionPrivate session;
-	int retval;
-
-	if ( !session->server->is_running ) 
-		goto SESSION_CLEANUP;
-
-	switch(session->progress) {
-	case SESSION_PROCESS_READ_HEADER:
-		retval = read_header(session);
-		if (retval == -1)	goto SESSION_CLEANUP;
-		if (retval == 0)	break;
-
-		session->progress++;
-
-	case SESSION_PROCESS_PARSE_HEADER:
-		if (parse_header(session) == -1)
-			goto SESSION_CLEANUP;
-
-		if (session->bodylen > 0) {
-			session->body = malloc(session->bodylen);
-
-			if (session->body == NULL)
-				goto SESSION_CLEANUP;
-		} else {
-			session->progress++;
-		}
-
-		session->progress++;
-		if (session->progress == SESSION_PROCESS_DONE)
-			goto SESSION_PROCESS_DONE;
-
-	case SESSION_PROCESS_READ_BODY:
-		retval = read_body(session);
-		if (retval == -1)
-			goto SESSION_CLEANUP;
-
-		if (retval == 0)
-			break;
-
-		session->progress++;
-
-	SESSION_PROCESS_DONE: case SESSION_PROCESS_DONE:
-		if (session->server->open_callback == NULL)
-			goto SESSION_CLEANUP;
-
-		session->server->open_callback((Session) session);
-
-		session->progress++;
-
-	case SESSION_PROCESS_REARMING: {
-		struct http_header_field *field = http_find_field(
-			&session->header, "Connection"
-		);
-
-		if ( !field || (field && strcmp(field->value, "keep-alive")) )
-			goto SESSION_CLEANUP;
-
-		session_rearm(session);
-	}	break;
+	case 1:
+		if (server->request_callback)
+			server->request_callback(client->session);
+		web_client_clear(client);
+		break;
 	}
 
 	return ;
-
-SESSION_CLEANUP: session_cleanup(session);
 }
 
-static void accept_client(void *arg)
+static void accept_client(int _, void *arg)
 {
-	WebServer server = NULL;
-	EventHandler handler = server->handler;
+	WebServer server;
+	WebClient client;
+	EventHandler next_handler;
+	int clnt_fd;
 
-	int listen_fd = 0;
+	server = arg;
 
 	if ( !server->is_running )
 		return ;
 
-	int clnt_fd = accept(listen_fd, NULL, NULL);
+	clnt_fd = accept(server->listener_fd, NULL, NULL);
 	if (clnt_fd == -1)
 		goto JUST_RETURN;
 
 	if (fcntl_set_nonblocking(clnt_fd) == -1)
 		goto CLOSE_FD;
 
-	SessionPrivate session = session_create(
-		clnt_fd, server->ctx, handle_client
-	);
-	if (session == NULL)
+	server->next_handler = (server->next_handler + 1) % server->n_handler;
+	next_handler = server->handlers[server->next_handler];
+
+	client = web_client_create(server, next_handler, handle_client, clnt_fd, server->ctx);
+	if (client == NULL)
 		goto CLOSE_FD;
 
-	if (server->ctx) {
-		while (true) {
-			int ret = SSL_accept(session->ssl);
-			if (ret == 1)
-				break;
+	if (server->open_callback)
+		server->open_callback(client->session);
 
-			ret = SSL_get_error(session->ssl, ret);
-			if (ret == SSL_ERROR_WANT_READ 
-			 || ret == SSL_ERROR_WANT_WRITE)
-				continue;
-
-			goto DESTROY_SESSION;
-		}
-	}
-
-	session->server = server;
-	if (event_handler_add(server->handler, clnt_fd,
-		       	      handle_client, server->handler) == -1)
-		goto DESTROY_SESSION;
+	if (event_handler_add(next_handler, client->event) == -1)
+		goto CLIENT_DESTROY;
 
 	return ;
 
-DESTROY_SESSION:session_destroy(session);
+CLIENT_DESTROY:	web_client_destroy(client);
 CLOSE_FD:	close(clnt_fd);
 JUST_RETURN:	return;
 }
@@ -321,15 +148,14 @@ RETURN_ERR:	return -1;
 
 WebServer web_server_create(WebServerConfig config)
 {
-	WebServer server = malloc(sizeof(struct web_server));
+	WebServer server;	
+
+	server = malloc(sizeof(struct web_server));
 	if (server == NULL)
 		goto RETURN_NULL;
 
-	if (config == NULL)
-		server->config = &(struct web_server_config)
-				  WEB_SERVER_DEFAULT_CONFIG;
-	else
-		server->config = config;
+	server->config = config;
+	server->n_handler = server->config->nthread;
 
 	if (server->config->use_ssl) {
  		if (web_server_init_ssl(server) == -1)
@@ -338,26 +164,37 @@ WebServer web_server_create(WebServerConfig config)
 		server->ctx = NULL;
 	}
 
-	if (config->hostname == NULL)
-		config->hostname = get_hostname(AF_INET);
-
-	int fd = make_listener(config->hostname, config->service, 15, true);
-	if (fd == -1)
+	server->listener_fd = make_listener(
+		config->hostname, config->service, 15, true
+	);
+	if (server->listener_fd == -1)
 		goto FREE_SSL;
 
-	server->handler = event_handler_create();
-	if (server->handler == NULL)
-		goto CLOSE_FD;
+	server->handlers = malloc(sizeof(EventHandler) * server->n_handler);
+	if (server->handlers == NULL)
+		goto CLOSE_LISTENER;
+
+	for (int i = 0; i < server->n_handler; i++) {
+		server->handlers[i] = event_handler_create();
+
+		if (server->handlers[i] == NULL) {
+			for (int j = i - 1; j >= 0; j--)
+				event_handler_destroy(server->handlers[j]);
+
+			goto FREE_HANDLERS;
+		}
+	}
 
 	server->open_callback = NULL;
+	server->request_callback = NULL;
 	server->close_callback = NULL;
 
 	server->is_running = false;
 
 	return server;
 
-DESTROY_HANDLER:event_handler_destroy(server->handler);
-CLOSE_FD:	close(fd);
+FREE_HANDLERS:	free(server->handlers);
+CLOSE_LISTENER:	close(server->listener_fd);
 FREE_SSL:	if (server->ctx)
 			SSL_CTX_free(server->ctx);
 FREE_SERVER:	free(server);
@@ -369,34 +206,56 @@ void web_server_destroy(WebServer server)
 	if (server->ctx)
 		SSL_CTX_free(server->ctx);
 
-	int fd;
-	close(fd);
+	close(server->listener_fd);
 
-	event_handler_destroy(server->handler);
+	for (int i = 0; i < server->n_handler; i++)
+		event_handler_destroy(server->handlers[i]);
 
 	free(server);
 }
 
 int web_server_start(WebServer server)
 {
-	server->is_running = true;
+	int retval;
 
-	if (event_handler_start(server->handler) == -1)
+	server->next_handler = 1;
+
+	server->listener = event_create(server->listener_fd,
+				 	accept_client, server);
+	if ( !server->listener )
 		return -1;
 
-	if (event_handler_add(server->handler, 0, NULL, NULL) == -1) {
-		event_handler_stop(server->handler);
+	for (int i = 0; i < server->n_handler; i++) {
+		retval = event_handler_start(server->handlers[i]);
+		if (retval == -1) {
+			for (int j = i - 1; j >= 0; j--)
+				event_handler_stop(server->handlers[j]);
+
+			return -1;
+		}
+	}
+	
+	retval = event_handler_add(server->handlers[0], server->listener);
+	if (retval == -1) {
+		event_destroy(server->listener);
+
+		for (int i = 0; i < server->n_handler; i++)
+			event_handler_stop(server->handlers[i]);
+
 		return -1;
 	}
+
+	server->is_running = true;	
 
 	return 0;
 }
 
 void web_server_register_handler(
-		WebServer server,
-		WebServerHandler open, WebServerHandler close
+		WebServer server, WebServerHandler open,
+		WebServerHandler request, WebServerHandler close
 ) {
 	server->open_callback = open;
+	server->request_callback = request;
 	server->close_callback = close;
 }
 
@@ -404,16 +263,13 @@ void web_server_stop(WebServer server)
 {
 	server->is_running = false;
 
-	event_handler_del(server->handler, 0);
-	event_handler_stop(server->handler);
+	event_handler_del(server->handlers[0], server->listener);
+
+	for (int i = 0 ; i < server->n_handler; i++)
+		event_handler_stop(server->handlers[i]);
 }
 
 WebServerConfig web_server_get_config(WebServer server)
 {
 	return server->config;
-}
-
-enum http_status_code web_server_error_code(enum web_server_error error)
-{
-	return error_to_code[error];
 }

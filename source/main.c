@@ -26,25 +26,31 @@ void signal_handler(int signo)
 	run_server = false;
 }
 
+static void open_handler(Session session)
+{
+	info("client %d connected.", session->fd);
+}
+
 static void request_handler(Session session)
 {
 	struct http_request_header *header = &session->header;
 	char *body = session->body;
-	size_t bodylen = session->bodylen;
 	char *file;
 
 	info("client %d request (%s): %s",
-      	      session->id, header->method, header->url);
+      	      session->fd, header->method, header->url);
 
 	switch (http_get_method(header))
 	{
 	case HTTP_REQUEST_GET:
 		if ( !strcmp(header->url, "/") )
-			file = "index.html";
+			file = "resources/index.html";
 		else if ( !strcmp(header->url, "/favicon.ico") )
 			file = "favicon.png";
 		else
 			file = header->url + 1;
+
+		ws_render(session, HTTP_STATUS_CODE_OK, file);
 
 		break;
 
@@ -55,7 +61,7 @@ static void request_handler(Session session)
 
 static void close_handler(Session session)
 {
-	info("client %d closed", session->id);
+	info("client %d closed", session->fd);
 }
 
 static bool init_config(WebServerConfig config, int argc, char **argv)
@@ -84,6 +90,8 @@ static bool init_config(WebServerConfig config, int argc, char **argv)
 
 	config->server_name = "mythos web server";
 
+	config->nthread = 4;
+
 	return true;
 }
 
@@ -105,7 +113,9 @@ int main(int argc, char *argv[])
 	if (server == NULL)
 		crtc("failed to web_server_create()");
 
-	web_server_register_handler(server, request_handler, close_handler);
+	web_server_register_handler(
+		server, open_handler, request_handler, close_handler
+	);
 
 	if (web_server_start(server) == -1)
 		crtc("failed to web_server_start()");

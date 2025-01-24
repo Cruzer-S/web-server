@@ -1,40 +1,39 @@
 #ifndef SESSION_H__
 #define SESSION_H__
 
-#include "web_server.h"
-
-#include "Cruzer-S/event-handler/event_handler.h"
+#include "Cruzer-S/http/http.h"
 
 #include <openssl/ssl.h>
 
-enum session_process {
-	SESSION_PROCESS_READ_HEADER,
-	SESSION_PROCESS_PARSE_HEADER,
-	SESSION_PROCESS_READ_BODY,
-	SESSION_PROCESS_DONE,
-	SESSION_PROCESS_REARMING
-};
+typedef struct web_client *WebClient;
 
-typedef struct session_private {
-	struct SESSION_MEMBER;
+typedef struct session {
+	struct http_request_header header;
 
-	enum web_server_error error;
-
-	WebServer server;
+	char *body;
+	size_t bodylen;	
 
 	size_t readlen;
 
+	int fd;
 	SSL *ssl;
 
-	enum session_process progress;
-} *SessionPrivate;
+	WebClient client;
+} *Session;
 
-SessionPrivate session_create(int fd, SSL_CTX *ctx, EventCallback callback);
-void session_destroy(SessionPrivate session);
+Session session_create(int fd, SSL_CTX *);
 
-int session_write(SessionPrivate session, void *buffer, int size);
-int session_read(SessionPrivate session, void *buffer, int size);
+int session_read_header(Session session);
+int session_read_body(Session session);
+int session_parse_header(Session session);
 
-enum web_server_error session_get_error(SessionPrivate );
+int session_clear(Session session);
+
+void session_destroy(Session );
+
+int session_write(Session , void *buffer, int size);
+int session_read(Session , void *buffer, int size);
+
+
 
 #endif

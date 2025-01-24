@@ -1,6 +1,7 @@
 #include "web_server_util.h"
 
 #include "web_server.h"
+#include "web_client.h"
 #include "session.h"
 
 #include "Cruzer-S/linux-lib/file.h"
@@ -15,9 +16,9 @@
 #include <sys/fcntl.h>
 #include <linux/limits.h>
 
-#define SESSION_ERR(S, E) { (S)->error = (E); return -1; }
+#define SESSION_ERR(S, E) return -1
 
-int session_send_file(SessionPrivate session, char *filename)
+int session_send_file(Session session, char *filename)
 {
 	int rfd = open(filename, O_RDWR);
 	int total_len = 0;
@@ -51,7 +52,7 @@ int session_send_file(SessionPrivate session, char *filename)
 	return total_len;
 }
 
-int session_send_data(SessionPrivate session, char *data, size_t remain_len)
+int session_send_data(Session session, char *data, size_t remain_len)
 {
 	int total_len = 0, readlen;
 
@@ -84,16 +85,16 @@ static int strtlen(int n, ...)
 }
 // `ws_render` only accept HTML file.
 // Therefore, `Content-Type` is fixed to `text/html; charset=utf-8`
-int ws_render_template(Session _, enum http_status_code code,
+int ws_render_template(Session session, enum http_status_code code,
 		       const char *filename, struct cjson_object *json)
 {
-	SessionPrivate session = (SessionPrivate) _;
-
+	WebServerConfig config;
 	char filepath[PATH_MAX];
 	long int fsize; char fsize_str[32];
 	struct http_response_header *header;
 	char *content, *rendered;
-	WebServerConfig config = web_server_get_config(session->server);
+
+	config = web_server_get_config(session->client->server);
 
 	if (strtlen(3, config->basedir, "/", filename) >= PATH_MAX)
 		SESSION_ERR(session, WS_ERROR_TOO_LONG_URI);
@@ -154,14 +155,14 @@ int ws_render_template(Session _, enum http_status_code code,
 	return 0;
 }
 
-int ws_render(Session _, enum http_status_code code, const char *filename)
+int ws_render(Session session, enum http_status_code code, const char *filename)
 {
-	SessionPrivate session = (SessionPrivate) _;
-
+	WebServerConfig config;
 	char filepath[PATH_MAX];
 	size_t fsize; char fsize_str[32];
 	struct http_response_header *header;
-	WebServerConfig config = web_server_get_config(session->server);
+
+	config = web_server_get_config(session->client->server);
 
 	if (strtlen(3, config->basedir, "/", filename) >= PATH_MAX)
 		SESSION_ERR(session, WS_ERROR_TOO_LONG_URI);
@@ -181,7 +182,7 @@ int ws_render(Session _, enum http_status_code code, const char *filename)
 
 	header = http_make_response_header(
 		HTTP_VERSION_1_1, code, 3,
-		"Server", config->server_name,
+		"Server", "server",
 		"Content-Length", fsize_str,
 		"Content-Type", "text/html; charset=utf-8"
 	);
@@ -209,9 +210,4 @@ int ws_render(Session _, enum http_status_code code, const char *filename)
 	free(header);
 
 	return 0;
-}
-
-enum web_server_error ws_get_session_error(Session session)
-{
-	return session_get_error((SessionPrivate) session);
 }
