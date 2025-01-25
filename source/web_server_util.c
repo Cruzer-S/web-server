@@ -16,7 +16,7 @@
 #include <sys/fcntl.h>
 #include <linux/limits.h>
 
-#define SESSION_ERR(S, E) return -1
+#define SESSION_ERR(S, E) { (S)->error = (E); return -1; }
 
 int session_send_file(Session session, char *filename)
 {
@@ -68,7 +68,6 @@ int session_send_data(Session session, char *data, size_t remain_len)
 	return total_len;
 }
 
-
 static int strtlen(int n, ...)
 {
 	int size = 0;
@@ -97,24 +96,24 @@ int ws_render_template(Session session, enum http_status_code code,
 	config = web_server_get_config(session->client->server);
 
 	if (strtlen(3, config->basedir, "/", filename) >= PATH_MAX)
-		SESSION_ERR(session, WS_ERROR_TOO_LONG_URI);
+		SESSION_ERR(session, SESSION_ERROR_TOO_LONG_URI);
 
 	sprintf(filepath, "%s/%s", config->basedir, filename);
 	if (strstr(filepath, ".."))
-		SESSION_ERR(session, WS_ERROR_BAD_REQUEST);
+		SESSION_ERR(session, SESSION_ERROR_BAD_REQUEST);
 
 	if ( !check_file_exists(filepath) )
-		SESSION_ERR(session, WS_ERROR_NOT_FOUND);
+		SESSION_ERR(session, SESSION_ERROR_NOT_FOUND);
 	
 	content = read_file(filepath);
 	if (content == NULL)
-		SESSION_ERR(session, WS_ERROR_INTERNAL);
+		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
 
 	rendered = ctemplate_render(content, json);
 	free(content);
 
 	if (rendered == NULL)
-		SESSION_ERR(session, WS_ERROR_INTERNAL);
+		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
 
 	fsize = strlen(rendered);
 	sprintf(fsize_str, "%ld", fsize);
@@ -126,7 +125,7 @@ int ws_render_template(Session session, enum http_status_code code,
 		"Content-Type", "text/html; charset=utf-8"
 	);
 	if (header == NULL)
-		SESSION_ERR(session, WS_ERROR_INTERNAL);
+		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
 
 
 	int headerlen = strlen(header->buffer);
@@ -137,7 +136,7 @@ int ws_render_template(Session session, enum http_status_code code,
 		if (retval == -1) {
 			free(rendered);
 			free(header);
-			SESSION_ERR(session, WS_ERROR_CLOSED);
+			SESSION_ERR(session, SESSION_ERROR_CLOSED);
 		}
 		
 		writelen += retval;
@@ -146,7 +145,7 @@ int ws_render_template(Session session, enum http_status_code code,
 	if (session_send_data(session, rendered, fsize) == -1) {
 		free(rendered);
 		free(header);
-		SESSION_ERR(session, WS_ERROR_CLOSED);
+		SESSION_ERR(session, SESSION_ERROR_CLOSED);
 	}
 
 	free(rendered);
@@ -165,18 +164,18 @@ int ws_render(Session session, enum http_status_code code, const char *filename)
 	config = web_server_get_config(session->client->server);
 
 	if (strtlen(3, config->basedir, "/", filename) >= PATH_MAX)
-		SESSION_ERR(session, WS_ERROR_TOO_LONG_URI);
+		SESSION_ERR(session, SESSION_ERROR_TOO_LONG_URI);
 
 	sprintf(filepath, "%s/%s", config->basedir, filename);
 	if (strstr(filepath, ".."))
-		SESSION_ERR(session, WS_ERROR_BAD_REQUEST);
+		SESSION_ERR(session, SESSION_ERROR_BAD_REQUEST);
 
 	if ( !check_file_exists(filepath) )
-		SESSION_ERR(session, WS_ERROR_NOT_FOUND);
+		SESSION_ERR(session, SESSION_ERROR_NOT_FOUND);
 
 	fsize = get_file_size(filepath);
 	if (fsize == -1)
-		SESSION_ERR(session, WS_ERROR_INTERNAL);
+		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
 
 	sprintf(fsize_str, "%zu", fsize);
 
@@ -187,7 +186,7 @@ int ws_render(Session session, enum http_status_code code, const char *filename)
 		"Content-Type", "text/html; charset=utf-8"
 	);
 	if (header == NULL)
-		SESSION_ERR(session, WS_ERROR_INTERNAL);
+		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
 
 	int headerlen = strlen(header->buffer);
 	int writelen = 0;
@@ -196,7 +195,7 @@ int ws_render(Session session, enum http_status_code code, const char *filename)
 		retval = session_write(session, header + writelen, headerlen);
 		if (retval == -1) {
 			free(header);
-			SESSION_ERR(session, WS_ERROR_CLOSED);
+			SESSION_ERR(session, SESSION_ERROR_CLOSED);
 		}
 		
 		writelen += retval;
@@ -204,7 +203,7 @@ int ws_render(Session session, enum http_status_code code, const char *filename)
 
 	if (session_send_file(session, filepath) == -1) {
 		free(header);
-		SESSION_ERR(session, WS_ERROR_CLOSED);
+		SESSION_ERR(session, SESSION_ERROR_CLOSED);
 	}
 
 	free(header);

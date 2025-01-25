@@ -22,15 +22,6 @@ typedef struct web_server_config {
 	int nthread;
 } *WebServerConfig;
 
-enum web_server_error {
-	WS_ERROR_NONE,
-	WS_ERROR_BAD_REQUEST,
-	WS_ERROR_TOO_LONG_URI,
-	WS_ERROR_NOT_FOUND,
-	WS_ERROR_CLOSED,
-	WS_ERROR_INTERNAL
-};
-
 typedef struct web_server *WebServer;
 typedef void (*WebServerHandler)(Session );
 

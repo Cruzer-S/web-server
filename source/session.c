@@ -6,6 +6,15 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
+enum http_status_code session_errror_to_status_code[] = {
+	[SESSION_ERROR_NONE] = HTTP_STATUS_CODE_OK,
+	[SESSION_ERROR_CLOSED] = HTTP_STATUS_CODE_INTERNAL,
+	[SESSION_ERROR_INTERNAL] = HTTP_STATUS_CODE_INTERNAL,
+	[SESSION_ERROR_NOT_FOUND] = HTTP_STATUS_CODE_NOT_FOUND,
+	[SESSION_ERROR_BAD_REQUEST] = HTTP_STATUS_CODE_BAD_REQUEST,
+	[SESSION_ERROR_TOO_LONG_URI] = HTTP_STATUS_CODE_URI_TOO_LONG,
+};
+
 Session session_create(int fd, SSL_CTX *ctx)
 {
 	Session session;
