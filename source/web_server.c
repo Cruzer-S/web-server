@@ -211,6 +211,7 @@ void web_server_destroy(WebServer server)
 	for (int i = 0; i < server->n_handler; i++)
 		event_handler_destroy(server->handlers[i]);
 
+	free(server->handlers);
 	free(server);
 }
 
@@ -261,12 +262,25 @@ void web_server_register_handler(
 
 void web_server_stop(WebServer server)
 {
+	WebClient client;
+	struct list *events;
+
 	server->is_running = false;
 
 	event_handler_del(server->handlers[0], server->listener);
+	event_destroy(server->listener);
 
-	for (int i = 0 ; i < server->n_handler; i++)
+	for (int i = 0 ; i < server->n_handler; i++) {
 		event_handler_stop(server->handlers[i]);
+
+		events = event_handler_get_events(server->handlers[i]);
+		LIST_FOREACH_ENTRY_SAFE(events, event, struct event, list) {
+			client = event->arg;
+			event_handler_del(client->handler, client->event);
+			close(client->session->fd);
+			web_client_destroy(client);
+		}
+	}
 }
 
 WebServerConfig web_server_get_config(WebServer server)
