@@ -50,9 +50,15 @@ Session session_create(int fd, SSL_CTX *ctx)
 				break;
 
 			ret = SSL_get_error(session->ssl, ret);
-			if (ret == SSL_ERROR_WANT_READ 
-			 || ret == SSL_ERROR_WANT_WRITE)
+			switch (ret)
+			{
+			case SSL_ERROR_WANT_READ:
+			case SSL_ERROR_WANT_WRITE:
 				continue;
+
+			default:
+				goto FREE_SSL;
+			}
 		}
 	} else {
 		session->ssl = NULL;
@@ -309,12 +315,25 @@ static int strtlen(int n, ...)
 	return size;
 }
 
+static char *check_file_type(const char *filename)
+{
+	if (strstr(filename, ".html"))
+		return "text/html";
+	else if (strstr(filename, ".ctml"))
+		return "text/html";
+	else if (strstr(filename, ".css"))
+		return "text/css";
+
+	return "binary";
+}
+
 int session_render_template(Session session, enum http_status_code code,
 		       	    const char *filename, struct cjson_object *json)
 {
 	WebServerConfig config;
 	char filepath[PATH_MAX];
 	long int fsize; char fsize_str[32];
+	char *filetype;
 	struct http_response_header *header;
 	char *content, *rendered;
 
@@ -343,11 +362,13 @@ int session_render_template(Session session, enum http_status_code code,
 	fsize = strlen(rendered);
 	sprintf(fsize_str, "%ld", fsize);
 
+	filetype = check_file_type(filename);
+
 	header = http_make_response_header(
 		HTTP_VERSION_1_1, code, 3,
 		"Server", config->server_name,
 		"Content-Length", fsize_str,
-		"Content-Type", "text/html; charset=utf-8"
+		"Content-Type", filetype
 	);
 	if (header == NULL)
 		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
@@ -383,7 +404,7 @@ int session_render(Session session,
 		   enum http_status_code code, const char *filename)
 {
 	WebServerConfig config;
-	char filepath[PATH_MAX];
+	char filepath[PATH_MAX], *filetype;
 	size_t fsize; char fsize_str[32];
 	struct http_response_header *header;
 
@@ -405,11 +426,13 @@ int session_render(Session session,
 
 	sprintf(fsize_str, "%zu", fsize);
 
+	filetype = check_file_type(filename);
+
 	header = http_make_response_header(
 		HTTP_VERSION_1_1, code, 3,
-		"Server", "server",
+		"Server", config->server_name,
 		"Content-Length", fsize_str,
-		"Content-Type", "text/html; charset=utf-8"
+		"Content-Type", filetype
 	);
 	if (header == NULL)
 		SESSION_ERR(session, SESSION_ERROR_INTERNAL);
