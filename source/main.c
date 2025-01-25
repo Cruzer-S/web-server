@@ -13,7 +13,7 @@
 #include "Cruzer-S/net-util/net-util.h"
 
 #include "web_server.h"
-#include "web_server_util.h"
+#include "session.h"
 
 #define info(...) log(INFO, __VA_ARGS__)
 #define crtc(...) log(PCRTC, __VA_ARGS__), exit(EXIT_FAILURE)
@@ -50,7 +50,7 @@ static void request_handler(Session session)
 		else
 			file = header->url + 1;
 
-		ws_render(session, HTTP_STATUS_CODE_OK, file);
+		session_render(session, HTTP_STATUS_CODE_OK, file);
 
 		break;
 

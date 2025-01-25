@@ -2,6 +2,7 @@
 #define SESSION_H__
 
 #include "Cruzer-S/http/http.h"
+#include "Cruzer-S/cjson/cjson.h"
 
 #include <openssl/ssl.h>
 
@@ -46,5 +47,9 @@ void session_destroy(Session );
 
 int session_write(Session , void *buffer, int size);
 int session_read(Session , void *buffer, int size);
+
+int session_render(Session , enum http_status_code , const char *filename);
+int session_render_template(Session , enum http_status_code ,
+		       	    const char *filename, struct cjson_object *);
 
 #endif
